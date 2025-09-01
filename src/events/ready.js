@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = (client) => {
-  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12); // z.B. 20250901xx
   const jobsPath = path.join(__dirname, '..', 'jobs');
 
   let loaded = 0;
@@ -26,5 +25,5 @@ module.exports = (client) => {
     console.warn('⚠️ jobs/-Ordner nicht gefunden, überspringe Job-Loading.');
   }
 
-  console.log(`✅ Bard (${stamp}) ist online als ${client.user.tag} — ${loaded} Job(s) aktiv`);
+  console.log(`✅ Bard ist online als ${client.user.tag} — ${loaded} Job(s) aktiv`);
 };
