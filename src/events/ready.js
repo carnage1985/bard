@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = (client) => {
-  client.once('ready', () => {
-    console.log(`✅ Bard ist online als ${client.user.tag}`);
+client.once('clientReady', () => {
+  console.log(`✅ Bard ist online als ${client.user.tag}`);
 
     const jobsPath = path.join(__dirname, '..', 'jobs');
     if (!fs.existsSync(jobsPath)) {
