@@ -3,7 +3,7 @@ const path = require('path');
 
 module.exports = (client) => {
 client.once('clientReady', () => {
-  console.log(`✅ Bard ist online als ${client.user.tag}`);
+  console.log(`✅ Bard v20250901.2328 ist online als ${client.user.tag}`);
 
     const jobsPath = path.join(__dirname, '..', 'jobs');
     if (!fs.existsSync(jobsPath)) {
