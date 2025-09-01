@@ -2,28 +2,29 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = (client) => {
-client.once('clientReady', () => {
-  console.log(`✅ Bard v20250901.2328 ist online als ${client.user.tag}`);
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12); // z.B. 20250901xx
+  const jobsPath = path.join(__dirname, '..', 'jobs');
 
-    const jobsPath = path.join(__dirname, '..', 'jobs');
-    if (!fs.existsSync(jobsPath)) {
-      console.warn('⚠️ jobs/-Ordner nicht gefunden, überspringe Job-Loading.');
-      return;
-    }
-
+  let loaded = 0;
+  if (fs.existsSync(jobsPath)) {
     const jobFiles = fs.readdirSync(jobsPath).filter(f => f.endsWith('.js'));
     for (const file of jobFiles) {
       try {
         const job = require(path.join(jobsPath, file));
         if (typeof job === 'function') {
-          job(client);
+          job(client);        // Job starten
+          loaded++;
           console.log(`🕒 Job geladen: ${file}`);
         } else {
-          console.warn(`⚠️ Datei ${file} exportiert keine Funktion.`);
+          console.warn(`⚠️ Datei ${file} exportiert keine Funktion – übersprungen.`);
         }
       } catch (e) {
         console.error(`❌ Fehler beim Laden von ${file}:`, e);
       }
     }
-  });
+  } else {
+    console.warn('⚠️ jobs/-Ordner nicht gefunden, überspringe Job-Loading.');
+  }
+
+  console.log(`✅ Bard (${stamp}) ist online als ${client.user.tag} — ${loaded} Job(s) aktiv`);
 };
