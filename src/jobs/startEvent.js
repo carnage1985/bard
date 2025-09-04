@@ -17,21 +17,38 @@ module.exports = (client) => {
 
       const now = DateTime.now().setZone('Europe/Vienna');
 
+      // Statistik-Zähler
+      let totalChecked = 0;
+      let startedCount = 0;
+      let skippedCount = 0;
+
       for (const event of events.values()) {
-        if (event.status !== GuildScheduledEventStatus.Scheduled) continue;
+        totalChecked++;
+
+        if (event.status !== GuildScheduledEventStatus.Scheduled) {
+          skippedCount++;
+          continue;
+        }
 
         const desc = event.description ?? '';
-        if (!/autostart/i.test(desc)) continue; // nur mit "autostart"
+        if (!/autostart/i.test(desc)) {
+          skippedCount++;
+          continue;
+        }
 
         const start = DateTime.fromJSDate(event.scheduledStartAt).setZone('Europe/Vienna');
-
-        // Prüfen, ob Startzeit innerhalb der letzten 15 Minuten liegt
         const diffMinutes = now.diff(start, 'minutes').minutes;
-        if (diffMinutes < 0 || diffMinutes > 15) continue;
+
+        // Nur wenn Startzeit <= jetzt und max. 15 Minuten alt
+        if (diffMinutes < 0 || diffMinutes > 15) {
+          skippedCount++;
+          continue;
+        }
 
         // Event starten
         await event.edit({ status: GuildScheduledEventStatus.Active });
         console.log(`✅ Event gestartet: ${event.name} (${event.id})`);
+        startedCount++;
 
         if (!event.channelId) {
           console.warn(`ℹ️ Event ${event.name} hat keinen Channel – kein Chat-Post.`);
@@ -65,6 +82,10 @@ module.exports = (client) => {
             : { parse: [] }
         });
       }
+
+      // Zusammenfassung ins Log
+      console.log(`🔎 Event-Check: geprüft=${totalChecked}, gestartet=${startedCount}, übersprungen=${skippedCount}`);
+
     } catch (err) {
       console.error('❌ Fehler beim 15-Minuten-Event-Check:', err);
     }
