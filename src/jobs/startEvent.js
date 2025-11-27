@@ -2,13 +2,13 @@ const cron = require('node-cron');
 const { DateTime } = require('luxon');
 const { GuildScheduledEventStatus, ChannelType } = require('discord.js');
 
-module.exports = (client) => {
+module.exports = (client, logger = console) => {
   // Alle 15 Minuten
   cron.schedule('*/15 * * * *', async () => {
     try {
       const guildId = process.env.GUILD_ID;
       if (!guildId) {
-        console.warn('⚠️ GUILD_ID fehlt in .env, überspringe.');
+        logger.warn('⚠️ GUILD_ID fehlt in .env, überspringe.');
         return;
       }
 
@@ -47,17 +47,17 @@ module.exports = (client) => {
 
         // Event starten
         await event.edit({ status: GuildScheduledEventStatus.Active });
-        console.log(`✅ Event gestartet: ${event.name} (${event.id})`);
+        logger.info(`✅ Event gestartet: ${event.name} (${event.id})`);
         startedCount++;
 
         if (!event.channelId) {
-          console.warn(`ℹ️ Event ${event.name} hat keinen Channel – kein Chat-Post.`);
+          logger.warn(`ℹ️ Event ${event.name} hat keinen Channel – kein Chat-Post.`);
           continue;
         }
 
         const vc = await client.channels.fetch(event.channelId).catch(() => null);
         if (!vc || (vc.type !== ChannelType.GuildVoice && vc.type !== ChannelType.GuildStageVoice)) {
-          console.warn(`ℹ️ Channel für ${event.name} ist kein Voice/Stage – kein Chat-Post.`);
+          logger.warn(`ℹ️ Channel für ${event.name} ist kein Voice/Stage – kein Chat-Post.`);
           continue;
         }
 
@@ -69,7 +69,7 @@ module.exports = (client) => {
           if (role) {
             roleIdForMention = role.id;
           } else {
-            console.warn(`⚠️ Rolle "${atMatch[1]}" nicht gefunden – sende ohne Rollenping.`);
+            logger.warn(`⚠️ Rolle "${atMatch[1]}" nicht gefunden – sende ohne Rollenping.`);
           }
         }
 
@@ -84,10 +84,10 @@ module.exports = (client) => {
       }
 
       // Zusammenfassung ins Log
-      console.log(`🔎 Event-Check: geprüft=${totalChecked}, gestartet=${startedCount}, übersprungen=${skippedCount}`);
+      logger.info(`🔎 Event-Check: geprüft=${totalChecked}, gestartet=${startedCount}, übersprungen=${skippedCount}`);
 
     } catch (err) {
-      console.error('❌ Fehler beim 15-Minuten-Event-Check:', err);
+      logger.error('❌ Fehler beim 15-Minuten-Event-Check:', err);
     }
   }, { timezone: 'Europe/Vienna' });
 };

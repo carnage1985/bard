@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-module.exports = (client) => {
+module.exports = (client, logger = console) => {
   const jobsPath = path.join(__dirname, '..', 'jobs');
 
   let loaded = 0;
@@ -11,19 +11,19 @@ module.exports = (client) => {
       try {
         const job = require(path.join(jobsPath, file));
         if (typeof job === 'function') {
-          job(client);        // Job starten
+          job(client, logger);        // Job starten
           loaded++;
-          console.log(`🕒 Job geladen: ${file}`);
+          logger.info(`🕒 Job geladen: ${file}`);
         } else {
-          console.warn(`⚠️ Datei ${file} exportiert keine Funktion – übersprungen.`);
+          logger.warn(`⚠️ Datei ${file} exportiert keine Funktion – übersprungen.`);
         }
       } catch (e) {
-        console.error(`❌ Fehler beim Laden von ${file}:`, e);
+        logger.error(`❌ Fehler beim Laden von ${file}:`, e);
       }
     }
   } else {
-    console.warn('⚠️ jobs/-Ordner nicht gefunden, überspringe Job-Loading.');
+    logger.warn('⚠️ jobs/-Ordner nicht gefunden, überspringe Job-Loading.');
   }
 
-  console.log(`✅ Bard ist online als ${client.user.tag} — ${loaded} Job(s) aktiv`);
+  logger.info(`✅ Bard ist online als ${client.user.tag} — ${loaded} Job(s) aktiv`);
 };
