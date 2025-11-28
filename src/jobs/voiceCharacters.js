@@ -3,7 +3,15 @@ const {
   getCharacterName,
 } = require('../utils/voiceCharactersStore');
 
+// Merkt sich den ursprünglichen Nickname/Displayname, solange der User im Charakter-Channel ist.
 const originalNames = new Map();
+
+function rememberOriginalName(key, member) {
+  if (originalNames.has(key)) return originalNames.get(key);
+  const snapshot = { nickname: member.nickname, displayName: member.displayName };
+  originalNames.set(key, snapshot);
+  return snapshot;
+}
 
 async function applyNickname(member, nickname, logger) {
   if (!member.manageable) {
@@ -26,9 +34,10 @@ async function restoreNickname(member, key, logger) {
     logger.warn(`⚠️ Kann Original-Nick von ${member.user.tag} nicht wiederherstellen (fehlende Rechte?).`);
     return;
   }
-  if (member.nickname === original) return;
+  const targetNickname = original.nickname ?? original.displayName ?? null;
+  if (member.nickname === targetNickname) return;
   try {
-    await member.setNickname(original, 'D&D Charaktername beendet');
+    await member.setNickname(targetNickname, 'D&D Charaktername beendet');
   } catch (err) {
     logger.error(`❌ Konnte Original-Nick von ${member.user.tag} nicht wiederherstellen:`, err);
   }
@@ -53,9 +62,7 @@ module.exports = (client, logger = console) => {
 
     // Wenn wir in einen Charakter-Channel joinen oder wechseln, Nickname setzen
     if (nextChar) {
-      if (!originalNames.has(key)) {
-        originalNames.set(key, member.nickname ?? member.user.username);
-      }
+      rememberOriginalName(key, member);
       await applyNickname(member, nextChar, logger);
       return;
     }
