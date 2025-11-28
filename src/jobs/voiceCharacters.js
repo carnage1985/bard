@@ -1,36 +1,9 @@
-const fs = require('fs');
-const path = require('path');
+const {
+  watchConfig,
+  getCharacterName,
+} = require('../utils/voiceCharactersStore');
 
-const CONFIG_PATH = path.join(__dirname, '..', 'voiceCharacters.json');
 const originalNames = new Map();
-let config = {};
-let lastConfigMtimeMs = 0;
-
-function loadConfig(logger) {
-  try {
-    const stats = fs.statSync(CONFIG_PATH);
-    if (stats.mtimeMs === lastConfigMtimeMs && Object.keys(config).length) return;
-    lastConfigMtimeMs = stats.mtimeMs;
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    config = JSON.parse(raw);
-    logger.info('🎭 voiceCharacters.json neu geladen.');
-  } catch (err) {
-    if (err.code === 'ENOENT') {
-      if (Object.keys(config).length) {
-        logger.warn('⚠️ voiceCharacters.json nicht gefunden – leere Konfiguration genutzt.');
-      }
-      config = {};
-      lastConfigMtimeMs = 0;
-    } else {
-      logger.error('❌ Konnte voiceCharacters.json nicht laden:', err);
-    }
-  }
-}
-
-function getCharacterName(guildId, channelId, userId) {
-  if (!guildId || !channelId || !userId) return null;
-  return config?.[guildId]?.[channelId]?.[userId] ?? null;
-}
 
 async function applyNickname(member, nickname, logger) {
   if (!member.manageable) {
@@ -62,14 +35,11 @@ async function restoreNickname(member, key, logger) {
 }
 
 module.exports = (client, logger = console) => {
-  loadConfig(logger);
-  fs.watchFile(CONFIG_PATH, { interval: 5000 }, () => loadConfig(logger));
+  watchConfig(logger);
 
   client.on('voiceStateUpdate', async (oldState, newState) => {
     // Bots ignorieren
     if (newState.member?.user?.bot || oldState.member?.user?.bot) return;
-
-    loadConfig(logger);
 
     const member = newState.member || oldState.member;
     if (!member) return;
@@ -78,8 +48,8 @@ module.exports = (client, logger = console) => {
     const previousChannelId = oldState.channelId;
     const nextChannelId = newState.channelId;
 
-    const previousChar = getCharacterName(member.guild.id, previousChannelId, member.id);
-    const nextChar = getCharacterName(member.guild.id, nextChannelId, member.id);
+    const previousChar = getCharacterName(member.guild.id, previousChannelId, member.id, logger);
+    const nextChar = getCharacterName(member.guild.id, nextChannelId, member.id, logger);
 
     // Wenn wir in einen Charakter-Channel joinen oder wechseln, Nickname setzen
     if (nextChar) {
