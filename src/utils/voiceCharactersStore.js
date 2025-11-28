@@ -18,11 +18,18 @@ function readConfig(logger) {
     logger?.info('🎭 voiceCharacters.json neu geladen.');
   } catch (err) {
     if (err.code === 'ENOENT') {
-      if (Object.keys(config).length) {
-        logger?.warn('⚠️ voiceCharacters.json nicht gefunden – leere Konfiguration genutzt.');
+      const hasExistingConfig = Object.keys(config).length > 0;
+      logger?.[hasExistingConfig ? 'warn' : 'info'](
+        hasExistingConfig
+          ? '⚠️ voiceCharacters.json nicht gefunden – vorhandene Konfiguration wird neu gespeichert.'
+          : '🆕 voiceCharacters.json nicht gefunden – lege leere Datei an.',
+      );
+      if (!hasExistingConfig) config = {};
+      try {
+        persist(logger);
+      } catch (persistErr) {
+        logger?.error('❌ Konnte voiceCharacters.json nicht neu erstellen:', persistErr);
       }
-      config = {};
-      lastConfigMtimeMs = 0;
     } else {
       logger?.error('❌ Konnte voiceCharacters.json nicht laden:', err);
     }
