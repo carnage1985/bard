@@ -3,12 +3,18 @@ const { DateTime } = require('luxon');
 const { GuildScheduledEventStatus, ChannelType } = require('discord.js');
 
 module.exports = (client, logger = console) => {
+  const localLogger = {
+    info: (...args) => logger.info(...args, { toDiscord: false }),
+    warn: (...args) => logger.warn(...args, { toDiscord: false }),
+    error: (...args) => logger.error(...args, { toDiscord: false }),
+  };
+
   // Alle 15 Minuten
   cron.schedule('*/15 * * * *', async () => {
     try {
       const guildId = process.env.GUILD_ID;
       if (!guildId) {
-        logger.warn('⚠️ GUILD_ID fehlt in .env, überspringe.');
+        localLogger.warn('⚠️ GUILD_ID fehlt in .env, überspringe.');
         return;
       }
 
@@ -47,17 +53,17 @@ module.exports = (client, logger = console) => {
 
         // Event starten
         await event.edit({ status: GuildScheduledEventStatus.Active });
-        logger.info(`✅ Event gestartet: ${event.name} (${event.id})`);
+        localLogger.info(`✅ Event gestartet: ${event.name} (${event.id})`);
         startedCount++;
 
         if (!event.channelId) {
-          logger.warn(`ℹ️ Event ${event.name} hat keinen Channel – kein Chat-Post.`);
+          localLogger.warn(`ℹ️ Event ${event.name} hat keinen Channel – kein Chat-Post.`);
           continue;
         }
 
         const vc = await client.channels.fetch(event.channelId).catch(() => null);
         if (!vc || (vc.type !== ChannelType.GuildVoice && vc.type !== ChannelType.GuildStageVoice)) {
-          logger.warn(`ℹ️ Channel für ${event.name} ist kein Voice/Stage – kein Chat-Post.`);
+          localLogger.warn(`ℹ️ Channel für ${event.name} ist kein Voice/Stage – kein Chat-Post.`);
           continue;
         }
 
@@ -69,7 +75,7 @@ module.exports = (client, logger = console) => {
           if (role) {
             roleIdForMention = role.id;
           } else {
-            logger.warn(`⚠️ Rolle "${atMatch[1]}" nicht gefunden – sende ohne Rollenping.`);
+            localLogger.warn(`⚠️ Rolle "${atMatch[1]}" nicht gefunden – sende ohne Rollenping.`);
           }
         }
 
@@ -84,10 +90,10 @@ module.exports = (client, logger = console) => {
       }
 
       // Zusammenfassung ins Log
-      logger.info(`🔎 Event-Check: geprüft=${totalChecked}, gestartet=${startedCount}, übersprungen=${skippedCount}`);
+      localLogger.info(`🔎 Event-Check: geprüft=${totalChecked}, gestartet=${startedCount}, übersprungen=${skippedCount}`);
 
     } catch (err) {
-      logger.error('❌ Fehler beim 15-Minuten-Event-Check:', err);
+      localLogger.error('❌ Fehler beim 15-Minuten-Event-Check:', err);
     }
   }, { timezone: 'Europe/Vienna' });
 };

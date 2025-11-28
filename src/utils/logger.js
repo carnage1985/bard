@@ -38,9 +38,21 @@ function createLogger(client, { channelId } = {}) {
       : JSON.stringify(a, null, 2);
 
   const enqueue = (level, ...args) => {
+    // Option: { toDiscord: false } als letztes Argument unterdrückt die Weiterleitung
+    let toDiscord = true;
+    if (args.length) {
+      const meta = args[args.length - 1];
+      if (meta && typeof meta === 'object' && meta.toDiscord === false) {
+        toDiscord = false;
+        args = args.slice(0, -1);
+      }
+    }
+
     // weiterhin in Konsole loggen
     // eslint-disable-next-line no-console
     console[level](...args);
+
+    if (!toDiscord) return;
 
     const line = `\`${ts()}\` **${level.toUpperCase()}** ${args.map(toText).join(' ')}`;
     for (const part of chunk(line)) queue.push(part);
