@@ -31,50 +31,38 @@ function formatList(guildId, logger) {
     : 'ℹ️ Keine Voice-Channels für den Alleine-Ping konfiguriert.';
 }
 
-function getCurrentVoiceChannel(member) {
-  const channel = member?.voice?.channel ?? null;
-  if (!channel) return null;
-  return [ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)
-    ? channel
-    : null;
-}
-
 module.exports = (client, logger = console) => {
   watchConfig(logger);
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
-    if (!message.content.toLowerCase().startsWith(PREFIX)) return;
+    const normalizedContent = message.content.trim();
+    if (!normalizedContent.toLowerCase().startsWith(PREFIX)) return;
 
     if (!hasPermission(message.member)) {
       await message.reply('❌ Du brauchst das Recht **Manage Channels** oder **Manage Server**, um das zu nutzen.');
       return;
     }
 
-    const args = message.content.trim().split(/\s+/);
-    const action = (args[1] || '').toLowerCase();
+    const remainder = normalizedContent.slice(PREFIX.length).trim();
+    const args = remainder ? remainder.split(/\s+/) : [];
+    const action = (args[0] || '').toLowerCase();
 
     if (!['set', 'remove', 'list', 'help'].includes(action)) {
-      await message.reply('Nutze `!voicewait set <minuten>`, `!voicewait remove`, `!voicewait list` oder optional weiter `!voicewait set <#voice> <minuten>`.');
+      await message.reply('Nutze `!voicewait set <voiceChannelId> <minuten>`, `!voicewait remove <voiceChannelId>` oder `!voicewait list`.');
       return;
     }
 
     try {
       if (action === 'set') {
-        let channel = null;
-        let waitMinutes = null;
-
-        const explicitChannelId = parseChannelId(args[2]);
-        if (explicitChannelId) {
-          channel = await message.guild.channels.fetch(explicitChannelId).catch(() => null);
-          waitMinutes = Number.parseInt(args[3], 10);
-        } else {
-          channel = getCurrentVoiceChannel(message.member);
-          waitMinutes = Number.parseInt(args[2], 10);
-        }
+        const channelId = parseChannelId(args[1]);
+        const waitMinutes = Number.parseInt(args[2], 10);
+        const channel = channelId
+          ? await message.guild.channels.fetch(channelId).catch(() => null)
+          : null;
 
         if (!channel || !Number.isInteger(waitMinutes)) {
-          await message.reply('❌ Bitte nutze `!voicewait set <minuten>` während du im Voice-Channel bist oder `!voicewait set <#voice> <minuten>`.');
+          await message.reply('❌ Bitte nutze `!voicewait set <voiceChannelId> <minuten>`.');
           return;
         }
 
@@ -95,13 +83,13 @@ module.exports = (client, logger = console) => {
       }
 
       if (action === 'remove') {
-        const explicitChannelId = parseChannelId(args[2]);
-        const channel = explicitChannelId
-          ? await message.guild.channels.fetch(explicitChannelId).catch(() => null)
-          : getCurrentVoiceChannel(message.member);
+        const channelId = parseChannelId(args[1]);
+        const channel = channelId
+          ? await message.guild.channels.fetch(channelId).catch(() => null)
+          : null;
 
         if (!channel) {
-          await message.reply('❌ Bitte nutze `!voicewait remove` während du im Voice-Channel bist oder `!voicewait remove <#voice>`.');
+          await message.reply('❌ Bitte nutze `!voicewait remove <voiceChannelId>`.');
           return;
         }
 
@@ -118,7 +106,7 @@ module.exports = (client, logger = console) => {
 
       if (action === 'list' || action === 'help') {
         const listText = formatList(message.guild.id, logger);
-        await message.reply(`${listText}\n\nHilfe: \`!voicewait set <minuten>\` im Voice-Channel oder optional \`!voicewait set <#voice> <minuten>\`.`);
+        await message.reply(`${listText}\n\nHilfe: \`!voicewait set <voiceChannelId> <minuten>\``);
       }
     } catch (err) {
       logger.error('❌ Fehler im !voicewait-Command:', err);
