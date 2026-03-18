@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { getDataFilePath, migrateLegacyFile } = require('./dataFilePath');
 
-const CONFIG_PATH = path.join(__dirname, '..', 'voiceCharacters.json');
+const LEGACY_CONFIG_PATH = path.join(__dirname, '..', 'voiceCharacters.json');
+const CONFIG_PATH = getDataFilePath('voiceCharacters.json');
 
 let config = {};
 let lastConfigMtimeMs = 0;
@@ -9,6 +11,7 @@ let watching = false;
 
 function readConfig(logger) {
   try {
+    migrateLegacyFile('voiceCharacters.json', LEGACY_CONFIG_PATH, logger);
     const stats = fs.statSync(CONFIG_PATH);
     if (stats.mtimeMs === lastConfigMtimeMs && Object.keys(config).length) return config;
 
@@ -58,6 +61,7 @@ function getCharacterName(guildId, channelId, userId, logger) {
 
 function persist(logger) {
   try {
+    migrateLegacyFile('voiceCharacters.json', LEGACY_CONFIG_PATH, logger);
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
     try {
       const stats = fs.statSync(CONFIG_PATH);
