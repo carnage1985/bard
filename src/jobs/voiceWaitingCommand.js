@@ -77,6 +77,7 @@ module.exports = (client, logger = console) => {
         }
 
         setWaitingChannel(message.guild.id, channel.id, waitMinutes, logger);
+        client.emit('voiceWaitConfigChanged', channel);
         logger.info(`📝 Voice-Wait gesetzt: guild=${message.guild.id} channel=${channel.id} waitMinutes=${waitMinutes}`);
         await message.reply(`✅ <#${channel.id}> ist jetzt berechtigt. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, wird ein \`@here\` gesendet.`);
         return;
@@ -99,6 +100,7 @@ module.exports = (client, logger = console) => {
           return;
         }
 
+        client.emit('voiceWaitConfigChanged', channel);
         logger.info(`🗑️ Voice-Wait entfernt: guild=${message.guild.id} channel=${channel.id}`);
         await message.reply(`✅ Alleine-Ping für <#${channel.id}> entfernt.`);
         return;

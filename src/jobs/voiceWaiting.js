@@ -1,8 +1,10 @@
 const { ChannelType } = require('discord.js');
 const {
   watchConfig,
-  getWaitingChannelConfig,
+  listWaitingChannels,
 } = require('../utils/voiceWaitingStore');
+
+const CHECK_INTERVAL_MS = 60 * 1000;
 
 function isSupportedVoiceChannel(channel) {
   return channel && [ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type);
@@ -15,118 +17,123 @@ function getHumanMembers(channel) {
 module.exports = (client, logger = console) => {
   watchConfig(logger);
 
-  const pendingTimers = new Map();
-  const sentNotifications = new Map();
+  const aloneState = new Map();
 
   function getKey(guildId, channelId) {
     return `${guildId}:${channelId}`;
   }
 
-  function clearTimer(key) {
-    const timer = pendingTimers.get(key);
-    if (timer) {
-      clearTimeout(timer);
-      pendingTimers.delete(key);
-    }
-  }
-
-  async function evaluateChannel(channel) {
+  async function inspectChannel(channel, waitMinutes) {
     if (!isSupportedVoiceChannel(channel)) return;
 
-    const config = getWaitingChannelConfig(channel.guild.id, channel.id, logger);
     const key = getKey(channel.guild.id, channel.id);
-
-    clearTimer(key);
-
-    if (!config) {
-      sentNotifications.delete(key);
-      return;
-    }
-
     const humans = getHumanMembers(channel);
+    const current = aloneState.get(key);
 
     if (humans.size !== 1) {
-      sentNotifications.delete(key);
+      aloneState.delete(key);
       return;
     }
 
     const [member] = humans.values();
-    const sessionId = member.id;
+    const now = Date.now();
 
-    if (sentNotifications.get(key) === sessionId) {
+    if (!current || current.userId !== member.id) {
+      aloneState.set(key, {
+        userId: member.id,
+        sinceMs: now,
+        notified: false,
+      });
+      logger.info(`🕒 Voice-Wait gestartet: guild=${channel.guild.id} channel=${channel.id} user=${member.id} waitMinutes=${waitMinutes}`);
       return;
     }
 
-    const waitMinutes = config.waitMinutes;
-    const waitMs = waitMinutes * 60 * 1000;
+    if (current.notified) {
+      return;
+    }
 
-    pendingTimers.set(key, setTimeout(async () => {
-      pendingTimers.delete(key);
+    if (now - current.sinceMs < waitMinutes * 60 * 1000) {
+      return;
+    }
 
-      try {
-        const refreshedChannel = await client.channels.fetch(channel.id).catch(() => null);
-        if (!isSupportedVoiceChannel(refreshedChannel)) return;
+    try {
+      await channel.send({
+        content: `@here <@${member.id}> wartet in diesem Channel auf Gesellschaft.`,
+        allowedMentions: {
+          parse: ['everyone', 'users'],
+          users: [member.id],
+        },
+      });
 
-        const refreshedConfig = getWaitingChannelConfig(refreshedChannel.guild.id, refreshedChannel.id, logger);
-        if (!refreshedConfig) {
-          sentNotifications.delete(key);
-          return;
-        }
+      aloneState.set(key, {
+        ...current,
+        notified: true,
+      });
+      logger.info(`📣 Voice-Wait Ping gesendet: guild=${channel.guild.id} channel=${channel.id} user=${member.id}`);
+    } catch (err) {
+      logger.error(`❌ Fehler beim Voice-Wait Ping für Channel ${channel.id}:`, err);
+    }
+  }
 
-        const refreshedHumans = getHumanMembers(refreshedChannel);
-        if (refreshedHumans.size !== 1) {
-          sentNotifications.delete(key);
-          return;
-        }
+  async function scanGuild(guild) {
+    const configuredChannels = listWaitingChannels(guild.id, logger);
+    const entries = Object.entries(configuredChannels);
 
-        const [stillWaitingMember] = refreshedHumans.values();
-        if (stillWaitingMember.id !== sessionId) {
-          sentNotifications.delete(key);
-          return;
-        }
+    for (const [channelId, entry] of entries) {
+      const waitMinutes = entry?.waitMinutes;
+      if (!Number.isInteger(waitMinutes) || waitMinutes < 1) continue;
 
-        if (sentNotifications.get(key) === sessionId) {
-          return;
-        }
+      const channel = guild.channels.cache.get(channelId)
+        || await guild.channels.fetch(channelId).catch(() => null);
 
-        await refreshedChannel.send({
-          content: `@here <@${stillWaitingMember.id}> wartet in diesem Channel auf Gesellschaft.`,
-          allowedMentions: {
-            parse: ['everyone', 'users'],
-            users: [stillWaitingMember.id],
-          },
-        });
-
-        sentNotifications.set(key, sessionId);
-        logger.info(`📣 Voice-Wait Ping gesendet: guild=${refreshedChannel.guild.id} channel=${refreshedChannel.id} user=${stillWaitingMember.id}`);
-      } catch (err) {
-        logger.error(`❌ Fehler beim Voice-Wait Ping für Channel ${channel.id}:`, err);
+      if (!channel) {
+        aloneState.delete(getKey(guild.id, channelId));
+        continue;
       }
-    }, waitMs));
+
+      await inspectChannel(channel, waitMinutes);
+    }
+  }
+
+  async function runScan() {
+    for (const guild of client.guilds.cache.values()) {
+      await scanGuild(guild);
+    }
   }
 
   client.on('voiceStateUpdate', async (oldState, newState) => {
-    const channelsToEvaluate = new Map();
+    const channels = [oldState.channel, newState.channel].filter(isSupportedVoiceChannel);
 
-    if (isSupportedVoiceChannel(oldState.channel)) {
-      channelsToEvaluate.set(oldState.channel.id, oldState.channel);
-    }
-    if (isSupportedVoiceChannel(newState.channel)) {
-      channelsToEvaluate.set(newState.channel.id, newState.channel);
-    }
+    for (const channel of channels) {
+      const configured = listWaitingChannels(channel.guild.id, logger)[channel.id];
+      if (!configured?.waitMinutes) {
+        aloneState.delete(getKey(channel.guild.id, channel.id));
+        continue;
+      }
 
-    for (const channel of channelsToEvaluate.values()) {
-      await evaluateChannel(channel);
+      await inspectChannel(channel, configured.waitMinutes);
     }
   });
 
-  for (const guild of client.guilds.cache.values()) {
-    for (const channel of guild.channels.cache.values()) {
-      if (isSupportedVoiceChannel(channel)) {
-        evaluateChannel(channel).catch((err) => {
-          logger.error(`❌ Fehler beim Initial-Check für Voice-Channel ${channel.id}:`, err);
-        });
-      }
+  client.on('voiceWaitConfigChanged', async (channel) => {
+    if (!isSupportedVoiceChannel(channel)) return;
+
+    const configured = listWaitingChannels(channel.guild.id, logger)[channel.id];
+    if (!configured?.waitMinutes) {
+      aloneState.delete(getKey(channel.guild.id, channel.id));
+      return;
     }
-  }
+
+    await inspectChannel(channel, configured.waitMinutes);
+  });
+
+  setInterval(() => {
+    runScan().catch((err) => {
+      logger.error('❌ Fehler beim Voice-Wait Scan:', err);
+    });
+  }, CHECK_INTERVAL_MS);
+
+  runScan().catch((err) => {
+    logger.error('❌ Fehler beim initialen Voice-Wait Scan:', err);
+  });
 };
