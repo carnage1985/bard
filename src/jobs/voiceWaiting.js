@@ -18,6 +18,7 @@ module.exports = (client, logger = console) => {
   watchConfig(logger);
 
   const aloneState = new Map();
+  let scanInProgress = false;
 
   function getKey(guildId, channelId) {
     return `${guildId}:${channelId}`;
@@ -43,12 +44,13 @@ module.exports = (client, logger = console) => {
         userId: member.id,
         sinceMs: now,
         notified: false,
+        sending: false,
       });
       logger.info(`🕒 Voice-Wait gestartet: guild=${channel.guild.id} channel=${channel.id} user=${member.id} waitMinutes=${waitMinutes}`);
       return;
     }
 
-    if (current.notified) {
+    if (current.notified || current.sending) {
       return;
     }
 
@@ -57,6 +59,11 @@ module.exports = (client, logger = console) => {
     }
 
     try {
+      aloneState.set(key, {
+        ...current,
+        sending: true,
+      });
+
       await channel.send({
         content: `@here <@${member.id}> wartet in diesem Channel auf Gesellschaft.`,
         allowedMentions: {
@@ -68,9 +75,14 @@ module.exports = (client, logger = console) => {
       aloneState.set(key, {
         ...current,
         notified: true,
+        sending: false,
       });
       logger.info(`📣 Voice-Wait Ping gesendet: guild=${channel.guild.id} channel=${channel.id} user=${member.id}`);
     } catch (err) {
+      aloneState.set(key, {
+        ...current,
+        sending: false,
+      });
       logger.error(`❌ Fehler beim Voice-Wait Ping für Channel ${channel.id}:`, err);
     }
   }
@@ -96,8 +108,17 @@ module.exports = (client, logger = console) => {
   }
 
   async function runScan() {
-    for (const guild of client.guilds.cache.values()) {
-      await scanGuild(guild);
+    if (scanInProgress) {
+      return;
+    }
+
+    scanInProgress = true;
+    try {
+      for (const guild of client.guilds.cache.values()) {
+        await scanGuild(guild);
+      }
+    } finally {
+      scanInProgress = false;
     }
   }
 
