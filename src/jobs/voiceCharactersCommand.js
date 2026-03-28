@@ -5,6 +5,7 @@ const {
   removeCharacterName,
   listCharacters,
 } = require('../utils/voiceCharactersStore');
+const { syncMemberCharacterName } = require('./voiceCharacters');
 
 const PREFIX = '!dndchar';
 
@@ -37,6 +38,16 @@ function formatList(guildId, channelId, logger) {
 function hasPermission(member) {
   return member.permissions.has(PermissionsBitField.Flags.ManageNicknames)
     || member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+}
+
+async function getGuildMember(guild, userId) {
+  if (!guild || !userId) return null;
+  if (guild.members.cache.has(userId)) return guild.members.cache.get(userId);
+  try {
+    return await guild.members.fetch(userId);
+  } catch {
+    return null;
+  }
 }
 
 module.exports = (client, logger = console) => {
@@ -75,6 +86,10 @@ module.exports = (client, logger = console) => {
         }
 
         setCharacterName(message.guild.id, channelId, userId, characterName, logger);
+        const member = await getGuildMember(message.guild, userId);
+        if (member?.voice?.channelId === channelId) {
+          await syncMemberCharacterName(member, channelId, logger);
+        }
         logger.info(`📝 D&D-Char gesetzt: guild=${message.guild.id} channel=${channelId} user=${userId} → ${characterName}`);
         await message.reply(`✅ Gespeichert: <@${userId}> wird in <#${channelId}> zu **${characterName}**.`);
         return;
@@ -93,6 +108,11 @@ module.exports = (client, logger = console) => {
         if (!removed) {
           await message.reply('ℹ️ Kein Eintrag gefunden, es wurde nichts gelöscht.');
           return;
+        }
+
+        const member = await getGuildMember(message.guild, userId);
+        if (member?.voice?.channelId === channelId) {
+          await syncMemberCharacterName(member, channelId, logger);
         }
 
         logger.info(`🗑️ D&D-Char entfernt: guild=${message.guild.id} channel=${channelId} user=${userId}`);

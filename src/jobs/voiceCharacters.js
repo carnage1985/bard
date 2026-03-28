@@ -6,6 +6,10 @@ const {
 // Merkt sich den ursprünglichen Nickname/Displayname, solange der User im Charakter-Channel ist.
 const originalNames = new Map();
 
+function getMemberKey(member) {
+  return `${member.guild.id}:${member.id}`;
+}
+
 function rememberOriginalName(key, member) {
   if (originalNames.has(key)) return originalNames.get(key);
   const snapshot = { nickname: member.nickname, displayName: member.displayName };
@@ -43,7 +47,28 @@ async function restoreNickname(member, key, logger) {
   }
 }
 
-module.exports = (client, logger = console) => {
+async function syncMemberCharacterName(member, channelId, logger) {
+  if (!member) return false;
+
+  const key = getMemberKey(member);
+  const activeChannelId = channelId ?? member.voice?.channelId ?? null;
+  const activeCharacterName = getCharacterName(member.guild.id, activeChannelId, member.id, logger);
+
+  if (activeCharacterName) {
+    rememberOriginalName(key, member);
+    await applyNickname(member, activeCharacterName, logger);
+    return true;
+  }
+
+  if (originalNames.has(key)) {
+    await restoreNickname(member, key, logger);
+    return true;
+  }
+
+  return false;
+}
+
+function registerVoiceCharacters(client, logger = console) {
   watchConfig(logger);
 
   client.on('voiceStateUpdate', async (oldState, newState) => {
@@ -53,23 +78,23 @@ module.exports = (client, logger = console) => {
     const member = newState.member || oldState.member;
     if (!member) return;
 
-    const key = `${member.guild.id}:${member.id}`;
     const previousChannelId = oldState.channelId;
     const nextChannelId = newState.channelId;
 
     const previousChar = getCharacterName(member.guild.id, previousChannelId, member.id, logger);
-    const nextChar = getCharacterName(member.guild.id, nextChannelId, member.id, logger);
 
     // Wenn wir in einen Charakter-Channel joinen oder wechseln, Nickname setzen
-    if (nextChar) {
-      rememberOriginalName(key, member);
-      await applyNickname(member, nextChar, logger);
+    if (getCharacterName(member.guild.id, nextChannelId, member.id, logger)) {
+      await syncMemberCharacterName(member, nextChannelId, logger);
       return;
     }
 
     // Wenn wir einen Charakter-Channel verlassen, originalen Nick zurücksetzen
-    if (previousChar || (!nextChannelId && originalNames.has(key))) {
-      await restoreNickname(member, key, logger);
+    if (previousChar || (!nextChannelId && originalNames.has(getMemberKey(member)))) {
+      await syncMemberCharacterName(member, null, logger);
     }
   });
-};
+}
+
+module.exports = registerVoiceCharacters;
+module.exports.syncMemberCharacterName = syncMemberCharacterName;
