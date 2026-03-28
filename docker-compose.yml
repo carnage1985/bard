@@ -1,0 +1,12 @@
+services:
+  bard:
+    image: carnages/bard:latest
+    container_name: bard
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: "TOKEN"
+    volumes:
+      - bard_data:/data
+
+volumes:
+  bard_data:
