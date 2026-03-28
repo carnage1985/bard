@@ -60,7 +60,7 @@ module.exports = (client, logger = console) => {
       await channel.send({
         content: `@here <@${member.id}> wartet in diesem Channel auf Gesellschaft.`,
         allowedMentions: {
-          parse: ['everyone', 'users'],
+          parse: ['everyone'],
           users: [member.id],
         },
       });
