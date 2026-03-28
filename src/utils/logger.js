@@ -59,7 +59,7 @@ function createLogger(client, { channelId } = {}) {
   };
 
   return {
-    info:  (...a) => enqueue('log',  ...a),
+    info:  (...a) => enqueue('info', ...a),
     log:   (...a) => enqueue('log',  ...a),
     warn:  (...a) => enqueue('warn', ...a),
     error: (...a) => enqueue('error',...a),

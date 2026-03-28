@@ -3,7 +3,14 @@ const { Client, GatewayIntentBits, Events } = require('discord.js');
 require('dotenv').config();
 
 const client = new Client({
-  intents: Object.keys(GatewayIntentBits).map(k => GatewayIntentBits[k])
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
+  ],
 });
 
 // 🔸 Logger initialisieren (schickt Logs in den Discord-Channel aus LOG_CHANNEL_ID)

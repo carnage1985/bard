@@ -38,7 +38,7 @@ async function restoreNickname(member, key, logger) {
     logger.warn(`⚠️ Kann Original-Nick von ${member.user.tag} nicht wiederherstellen (fehlende Rechte?).`);
     return;
   }
-  const targetNickname = original.nickname ?? original.displayName ?? null;
+  const targetNickname = original.nickname;
   if (member.nickname === targetNickname) return;
   try {
     await member.setNickname(targetNickname, 'D&D Charaktername beendet');

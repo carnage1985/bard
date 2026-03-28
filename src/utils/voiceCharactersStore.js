@@ -8,6 +8,7 @@ const CONFIG_PATH = getDataFilePath('voiceCharacters.json');
 let config = {};
 let lastConfigMtimeMs = 0;
 let watching = false;
+let loaded = false;
 
 function readConfig(logger) {
   try {
@@ -18,6 +19,7 @@ function readConfig(logger) {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
     config = JSON.parse(raw || '{}');
     lastConfigMtimeMs = stats.mtimeMs;
+    loaded = true;
     logger?.info('🎭 voiceCharacters.json neu geladen.');
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -28,6 +30,7 @@ function readConfig(logger) {
           : '🆕 voiceCharacters.json nicht gefunden – lege leere Datei an.',
       );
       if (!hasExistingConfig) config = {};
+      loaded = true;
       try {
         persist(logger);
       } catch (persistErr) {
@@ -41,7 +44,7 @@ function readConfig(logger) {
 }
 
 function ensureLoaded(logger) {
-  if (!lastConfigMtimeMs && !Object.keys(config).length) {
+  if (!loaded) {
     readConfig(logger);
   }
 }
