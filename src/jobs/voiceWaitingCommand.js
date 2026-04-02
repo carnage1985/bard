@@ -23,7 +23,8 @@ function formatList(guildId, logger) {
   const data = listWaitingChannels(guildId, logger);
   const lines = Object.entries(data).map(([channelId, entry]) => {
     const waitMinutes = entry?.waitMinutes ?? '?';
-    return `• <#${channelId}> → Ping nach **${waitMinutes}** Minute(n) alleine`;
+    const notifyChannel = entry?.notifyChannelId ? `<#${entry.notifyChannelId}>` : '*(unbekannt)*';
+    return `• <#${channelId}> → Ping nach **${waitMinutes}** Min. alleine → Benachrichtigung in ${notifyChannel}`;
   });
 
   return lines.length
@@ -71,15 +72,15 @@ module.exports = (client, logger = console) => {
           return;
         }
 
-        if (!channel || ![ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)) {
+        if (![ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)) {
           await message.reply('❌ Das angegebene Ziel ist kein Voice- oder Stage-Channel.');
           return;
         }
 
-        setWaitingChannel(message.guild.id, channel.id, waitMinutes, logger);
+        setWaitingChannel(message.guild.id, channel.id, waitMinutes, message.channel.id, logger);
         client.emit('voiceWaitConfigChanged', channel);
-        logger.info(`📝 Voice-Wait gesetzt: guild=${message.guild.id} channel=${channel.id} waitMinutes=${waitMinutes}`);
-        await message.reply(`✅ <#${channel.id}> ist jetzt berechtigt. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, wird ein \`@here\` gesendet.`);
+        logger.info(`📝 Voice-Wait gesetzt: guild=${message.guild.id} channel=${channel.id} waitMinutes=${waitMinutes} notifyChannel=${message.channel.id}`);
+        await message.reply(`✅ <#${channel.id}> wird jetzt überwacht. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, kommt ein \`@here\`-Ping hier in <#${message.channel.id}>.`);
         return;
       }
 

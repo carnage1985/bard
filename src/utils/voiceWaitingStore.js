@@ -73,16 +73,10 @@ function watchConfig(logger) {
   fs.watchFile(CONFIG_PATH, { interval: 5000 }, () => readConfig(logger));
 }
 
-function getWaitingChannelConfig(guildId, channelId, logger) {
-  ensureLoaded(logger);
-  if (!guildId || !channelId) return null;
-  return config?.[guildId]?.[channelId] ?? null;
-}
-
-function setWaitingChannel(guildId, channelId, waitMinutes, logger) {
+function setWaitingChannel(guildId, channelId, waitMinutes, notifyChannelId, logger) {
   ensureLoaded(logger);
   if (!config[guildId]) config[guildId] = {};
-  config[guildId][channelId] = { waitMinutes };
+  config[guildId][channelId] = { waitMinutes, notifyChannelId };
   persist(logger);
 }
 
@@ -107,7 +101,6 @@ function listWaitingChannels(guildId, logger) {
 module.exports = {
   CONFIG_PATH,
   watchConfig,
-  getWaitingChannelConfig,
   setWaitingChannel,
   removeWaitingChannel,
   listWaitingChannels,
