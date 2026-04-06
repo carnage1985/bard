@@ -25,6 +25,10 @@ module.exports = (client, logger = console) => {
       '',
       '`!testnotification "<Nachricht>"`',
       '→ Sendet eine Test-DM an den Bot-Besitzer. *(Benötigt: Administrator)*',
+      '',
+      '`!chat <Nachricht>` oder **@Bot** <Nachricht>',
+      '`!chat reset`',
+      '→ Chattet mit dem Bot via Gemini AI. `reset` löscht den Gesprächsverlauf.',
     ];
 
     try {
