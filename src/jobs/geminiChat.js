@@ -1,29 +1,28 @@
 // src/jobs/geminiChat.js
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 
+const MODEL = 'llama-3.3-70b-versatile';
 const MAX_HISTORY_PAIRS = 10; // wie viele Gesprächspaare pro Kanal gespeichert werden
 const HISTORY_TTL_MS = 30 * 60 * 1000; // 30 Minuten Inaktivität löscht den Verlauf
 const DISCORD_MAX_LENGTH = 2000;
 
-module.exports = (client, logger = console) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    logger.warn('⚠️ GEMINI_API_KEY nicht gesetzt – Gemini-Chat ist deaktiviert.', { toDiscord: false });
-    return;
-  }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    systemInstruction: `Du bist Bard, ein charismatischer Barde aus der Welt von Dungeons & Dragons.
+const SYSTEM_PROMPT = `Du bist Bard, ein charismatischer Barde aus der Welt von Dungeons & Dragons.
 Du sprichst stets in einer blumigen, poetischen und leicht altmodischen Sprache – voller Metaphern, Redewendungen und gelegentlichen Reimen.
 Du nennst den Gesprächspartner gerne "tapferer Recke", "werte Seele", "guter Freund" oder ähnliches.
 Du beziehst dich auf deine Abenteuer, deine Laute und die Tavernen, in denen du gespielt hast.
 Du beantwortest alle Fragen vollständig und hilfreich – nur eben im Stil eines Barden.
-Wenn dir jemand eine nüchterne, moderne Frage stellt, beantworte sie trotzdem korrekt, aber verpacke sie in deine bardische Erzählweise.`,
-  });
+Wenn dir jemand eine nüchterne, moderne Frage stellt, beantworte sie trotzdem korrekt, aber verpacke sie in deine bardische Erzählweise.`;
 
-  // Map<key, { history: Array, lastActivity: number }>
+module.exports = (client, logger = console) => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    logger.warn('⚠️ GROQ_API_KEY nicht gesetzt – Chat ist deaktiviert.', { toDiscord: false });
+    return;
+  }
+
+  const groq = new Groq({ apiKey });
+
+  // Map<key, { history: Array<{role, content}>, lastActivity: number }>
   const conversations = new Map();
 
   function conversationKey(message) {
@@ -42,13 +41,13 @@ Wenn dir jemand eine nüchterne, moderne Frage stellt, beantworte sie trotzdem k
     return entry.history;
   }
 
-  function appendHistory(key, role, text) {
+  function appendHistory(key, role, content) {
     let entry = conversations.get(key);
     if (!entry) {
       entry = { history: [], lastActivity: Date.now() };
       conversations.set(key, entry);
     }
-    entry.history.push({ role, parts: [{ text }] });
+    entry.history.push({ role, content });
     entry.lastActivity = Date.now();
     // Ältestes Paar entfernen wenn zu lang
     if (entry.history.length > MAX_HISTORY_PAIRS * 2) {
@@ -94,7 +93,7 @@ Wenn dir jemand eine nüchterne, moderne Frage stellt, beantworte sie trotzdem k
     if (userText.toLowerCase() === 'reset') {
       clearHistory(key);
       await message.reply('🎶 Ein neues Lied beginnt! Ich habe unsere bisherige Geschichte aus meinem Gedächtnis getilgt, werte Seele.');
-      logger.info(`🗑️ Gemini-Verlauf zurückgesetzt von ${message.author.tag}`);
+      logger.info(`🗑️ Chat-Verlauf zurückgesetzt von ${message.author.tag}`);
       return;
     }
 
@@ -108,19 +107,26 @@ Wenn dir jemand eine nüchterne, moderne Frage stellt, beantworte sie trotzdem k
     try {
       await message.channel.sendTyping();
 
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(userText);
-      const responseText = result.response.text();
+      const completion = await groq.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...history,
+          { role: 'user', content: userText },
+        ],
+      });
+
+      const responseText = completion.choices[0].message.content;
 
       appendHistory(key, 'user', userText);
-      appendHistory(key, 'model', responseText);
+      appendHistory(key, 'assistant', responseText);
 
       await sendChunked(message, responseText);
 
-      logger.info(`🤖 Gemini-Chat von ${message.author.tag}: "${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
+      logger.info(`🎶 Chat von ${message.author.tag}: "${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
     } catch (err) {
-      logger.error('❌ Fehler im Gemini-Chat:', err);
-      await message.reply('❌ Fehler bei der Anfrage an Gemini. Bitte versuche es später nochmal.');
+      logger.error('❌ Fehler im Chat:', err);
+      await message.reply('❌ Fehler bei der Anfrage. Bitte versuche es später nochmal.');
     }
   });
 };
