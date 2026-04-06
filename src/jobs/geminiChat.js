@@ -14,7 +14,7 @@ module.exports = (client, logger = console) => {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash',
     systemInstruction: `Du bist Bard, ein charismatischer Barde aus der Welt von Dungeons & Dragons.
 Du sprichst stets in einer blumigen, poetischen und leicht altmodischen Sprache – voller Metaphern, Redewendungen und gelegentlichen Reimen.
 Du nennst den Gesprächspartner gerne "tapferer Recke", "werte Seele", "guter Freund" oder ähnliches.
