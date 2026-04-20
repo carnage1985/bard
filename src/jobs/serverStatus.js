@@ -9,6 +9,7 @@ const {
   loadHostingServers,
   getLastActiveMs,
   normalizeQueryHost,
+  normalizeQueryType,
 } = require('../utils/hostingServers');
 
 const QUERY_TIMEOUT_MS = 5000;
@@ -21,9 +22,10 @@ async function queryServer(server, logger) {
   }
   const queryHost = normalizeQueryHost(q.host);
   const queryPort = Number(q.port);
+  const queryType = normalizeQueryType(q.type);
   try {
     const state = await Gamedig.query({
-      type: q.type,
+      type: queryType,
       host: queryHost,
       port: queryPort,
       socketTimeout: QUERY_TIMEOUT_MS,
@@ -38,7 +40,7 @@ async function queryServer(server, logger) {
     };
   } catch (err) {
     const reason = err?.message || String(err);
-    logger?.warn?.(`⚠️ Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${q.type} ${queryHost}:${queryPort} → ${reason}`);
+    logger?.warn?.(`⚠️ Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${queryType} ${queryHost}:${queryPort} → ${reason}`);
     return { online: false, reason };
   }
 }

@@ -12,6 +12,18 @@ function normalizeQueryHost(host) {
   return host;
 }
 
+const QUERY_TYPE_ALIASES = {
+  source: 'protocol-valve',
+  valve: 'protocol-valve',
+  a2s: 'protocol-valve',
+};
+
+function normalizeQueryType(type) {
+  if (!type) return type;
+  const lower = String(type).toLowerCase();
+  return QUERY_TYPE_ALIASES[lower] ?? type;
+}
+
 function loadHostingServers(logger) {
   let entries;
   try {
@@ -76,4 +88,5 @@ module.exports = {
   loadHostingServers,
   getLastActiveMs,
   normalizeQueryHost,
+  normalizeQueryType,
 };

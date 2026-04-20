@@ -6,7 +6,7 @@ const {
   removeStatusConfig,
   getStatusConfig,
 } = require('../utils/serverStatusStore');
-const { loadHostingServers, HOSTING_DIR, normalizeQueryHost } = require('../utils/hostingServers');
+const { loadHostingServers, HOSTING_DIR, normalizeQueryHost, normalizeQueryType } = require('../utils/hostingServers');
 
 const PREFIX = '!serverstatus';
 const MIN_INTERVAL = 10;
@@ -155,9 +155,10 @@ module.exports = (client, logger = console) => {
           }
           const host = normalizeQueryHost(q.host);
           const port = Number(q.port);
+          const type = normalizeQueryType(q.type);
           try {
             const state = await Gamedig.query({
-              type: q.type,
+              type,
               host,
               port,
               socketTimeout: 5000,
@@ -166,10 +167,10 @@ module.exports = (client, logger = console) => {
             });
             const players = Array.isArray(state.players) ? state.players.length : (state.raw?.numplayers ?? 0);
             const max = state.maxplayers || s.maxPlayersFallback || 0;
-            lines.push(`${label} — 🟢 \`${q.type}://${host}:${port}\` · ${players}/${max} · "${state.name ?? ''}"`);
+            lines.push(`${label} — 🟢 \`${type}://${host}:${port}\` · ${players}/${max} · "${state.name ?? ''}"`);
           } catch (err) {
             const msg = err?.message || String(err);
-            lines.push(`${label} — 🔴 \`${q.type}://${host}:${port}\` · \`${msg}\``);
+            lines.push(`${label} — 🔴 \`${type}://${host}:${port}\` · \`${msg}\``);
           }
         }
         const out = lines.join('\n');

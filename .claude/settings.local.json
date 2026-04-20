@@ -16,7 +16,8 @@
       "Read(//c/Program Files \\(x86\\)/**)",
       "Bash(curl -s \"https://api.github.com/repos/carnage1985/bard/actions/runs?branch=main&per_page=3\")",
       "Bash(cat)",
-      "Bash(bash /tmp/wait_workflow.sh)"
+      "Bash(bash /tmp/wait_workflow.sh)",
+      "Bash(curl -s \"https://api.github.com/repos/carnage1985/bard/actions/runs?branch=main&per_page=1\")"
     ]
   }
 }
