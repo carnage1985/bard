@@ -13,16 +13,19 @@ const {
 
 const QUERY_TIMEOUT_MS = 5000;
 
-async function queryServer(server) {
+async function queryServer(server, logger) {
   const q = server.query;
   if (!q?.type || !q.port) {
+    logger?.warn?.(`⚠️ Server-Status Query übersprungen (${server.id ?? server._dir}): keine Query-Config.`);
     return { online: false, reason: 'keine Query-Config' };
   }
+  const queryHost = normalizeQueryHost(q.host);
+  const queryPort = Number(q.port);
   try {
     const state = await Gamedig.query({
       type: q.type,
-      host: normalizeQueryHost(q.host),
-      port: Number(q.port),
+      host: queryHost,
+      port: queryPort,
       socketTimeout: QUERY_TIMEOUT_MS,
       attemptTimeout: QUERY_TIMEOUT_MS,
       maxAttempts: 1,
@@ -34,7 +37,9 @@ async function queryServer(server) {
       maxPlayers: state.maxplayers || server.maxPlayersFallback || 0,
     };
   } catch (err) {
-    return { online: false, reason: err?.message || String(err) };
+    const reason = err?.message || String(err);
+    logger?.warn?.(`⚠️ Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${q.type} ${queryHost}:${queryPort} → ${reason}`);
+    return { online: false, reason };
   }
 }
 
@@ -105,7 +110,7 @@ module.exports = (client, logger = console) => {
 
       const servers = loadHostingServers(logger);
       const results = await Promise.all(servers.map(async (s) => {
-        const query = await queryServer(s);
+        const query = await queryServer(s, logger);
         return {
           id: s.id ?? s._dir,
           name: s.name ?? s._dir,

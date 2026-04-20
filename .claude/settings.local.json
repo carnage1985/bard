@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__7ca63218-f182-453d-9e3f-0b41e676e4d3__get_file_contents",
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:claude.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebSearch",
+      "Bash(npm install:*)",
+      "Bash(docker build:*)",
+      "Bash(gh run:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm uninstall:*)",
+      "Bash(where gh *)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Bash(curl -s \"https://api.github.com/repos/carnage1985/bard/actions/runs?branch=main&per_page=3\")",
+      "Bash(cat)",
+      "Bash(bash /tmp/wait_workflow.sh)"
+    ]
+  }
+}

@@ -1,11 +1,12 @@
 const { ChannelType, PermissionsBitField } = require('discord.js');
+const Gamedig = require('gamedig');
 const {
   watchConfig,
   setStatusConfig,
   removeStatusConfig,
   getStatusConfig,
 } = require('../utils/serverStatusStore');
-const { loadHostingServers, HOSTING_DIR } = require('../utils/hostingServers');
+const { loadHostingServers, HOSTING_DIR, normalizeQueryHost } = require('../utils/hostingServers');
 
 const PREFIX = '!serverstatus';
 const MIN_INTERVAL = 10;
@@ -39,8 +40,8 @@ module.exports = (client, logger = console) => {
     const args = remainder ? remainder.split(/\s+/) : [];
     const action = (args[0] || '').toLowerCase();
 
-    if (!['set', 'remove', 'refresh', 'list', 'help'].includes(action)) {
-      await message.reply('Nutze `!serverstatus set <sekunden> [channelId]`, `!serverstatus remove`, `!serverstatus refresh` oder `!serverstatus list`.');
+    if (!['set', 'remove', 'refresh', 'list', 'test', 'help'].includes(action)) {
+      await message.reply('Nutze `!serverstatus set <sekunden> [channelId]`, `!serverstatus remove`, `!serverstatus refresh`, `!serverstatus test` oder `!serverstatus list`.');
       return;
     }
 
@@ -134,6 +135,49 @@ module.exports = (client, logger = console) => {
         }
         client.emit('serverStatusRefreshRequested', message.guild.id);
         await message.reply('🔄 Update angestoßen.');
+        return;
+      }
+
+      if (action === 'test') {
+        const servers = loadHostingServers(logger);
+        if (!servers.length) {
+          await message.reply(`ℹ️ Keine Server in \`${HOSTING_DIR}\` gefunden.`);
+          return;
+        }
+        await message.reply(`🔍 Teste ${servers.length} Server …`);
+        const lines = [];
+        for (const s of servers) {
+          const label = `${s.icon ? s.icon + ' ' : ''}**${s.name ?? s._dir}**`;
+          const q = s.query;
+          if (!q?.type || !q.port) {
+            lines.push(`${label} — ❌ keine \`query\`-Config`);
+            continue;
+          }
+          const host = normalizeQueryHost(q.host);
+          const port = Number(q.port);
+          try {
+            const state = await Gamedig.query({
+              type: q.type,
+              host,
+              port,
+              socketTimeout: 5000,
+              attemptTimeout: 5000,
+              maxAttempts: 1,
+            });
+            const players = Array.isArray(state.players) ? state.players.length : (state.raw?.numplayers ?? 0);
+            const max = state.maxplayers || s.maxPlayersFallback || 0;
+            lines.push(`${label} — 🟢 \`${q.type}://${host}:${port}\` · ${players}/${max} · "${state.name ?? ''}"`);
+          } catch (err) {
+            const msg = err?.message || String(err);
+            lines.push(`${label} — 🔴 \`${q.type}://${host}:${port}\` · \`${msg}\``);
+          }
+        }
+        const out = lines.join('\n');
+        if (out.length < 1900) {
+          await message.channel.send(out);
+        } else {
+          for (const line of lines) await message.channel.send(line);
+        }
         return;
       }
 
