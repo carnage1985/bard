@@ -7,6 +7,9 @@ services:
       DISCORD_TOKEN: "TOKEN"
     volumes:
       - bard_data:/data
+      - /hosting:/hosting:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   bard_data:
