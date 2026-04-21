@@ -153,7 +153,7 @@ module.exports = (client, logger = console) => {
             lines.push(`${label} — ❌ keine \`query\`-Config`);
             continue;
           }
-          const host = normalizeQueryHost(q.host);
+          const host = normalizeQueryHost(q.host, s.address);
           const port = Number(q.port);
           const type = normalizeQueryType(q.type);
           try {

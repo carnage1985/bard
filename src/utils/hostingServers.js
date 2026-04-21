@@ -3,16 +3,29 @@ const path = require('path');
 
 const HOSTING_DIR = process.env.HOSTING_DIR || '/hosting';
 
-const HOST_NETWORK = ['1', 'true', 'yes'].includes(String(process.env.HOST_NETWORK ?? '').toLowerCase());
-
-function normalizeQueryHost(host) {
-  if (!host) return '127.0.0.1';
+function isLoopbackHost(host) {
+  if (!host) return true;
   const lower = String(host).toLowerCase();
-  const isLoopback = lower === '127.0.0.1' || lower === 'localhost' || lower === '::1';
-  if (isLoopback) {
-    return HOST_NETWORK ? '127.0.0.1' : 'host.docker.internal';
+  return lower === '127.0.0.1' || lower === 'localhost' || lower === '::1';
+}
+
+// Extract hostname from an "address" field like "dagon.at:9876" → "dagon.at"
+function hostnameFromAddress(address) {
+  if (!address) return null;
+  const parts = String(address).split(':');
+  return parts[0] || null;
+}
+
+function normalizeQueryHost(queryHost, serverAddress) {
+  if (!isLoopbackHost(queryHost)) return queryHost;
+
+  // Prefer public hostname from address field — avoids docker-proxy UDP loopback issues
+  const publicHost = hostnameFromAddress(serverAddress);
+  if (publicHost && publicHost !== 'localhost' && !isLoopbackHost(publicHost)) {
+    return publicHost;
   }
-  return host;
+
+  return queryHost || '127.0.0.1';
 }
 
 const QUERY_TYPE_ALIASES = {

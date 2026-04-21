@@ -17,7 +17,13 @@
       "Bash(curl -s \"https://api.github.com/repos/carnage1985/bard/actions/runs?branch=main&per_page=3\")",
       "Bash(cat)",
       "Bash(bash /tmp/wait_workflow.sh)",
-      "Bash(curl -s \"https://api.github.com/repos/carnage1985/bard/actions/runs?branch=main&per_page=1\")"
+      "Bash(curl -s \"https://api.github.com/repos/carnage1985/bard/actions/runs?branch=main&per_page=1\")",
+      "WebFetch(domain:dagon.at)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__read_page",
+      "mcp__Claude_in_Chrome__read_network_requests",
+      "mcp__Claude_in_Chrome__javascript_tool"
     ]
   }
 }

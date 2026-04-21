@@ -20,7 +20,7 @@ async function queryServer(server, logger) {
     logger?.warn?.(`⚠️ Server-Status Query übersprungen (${server.id ?? server._dir}): keine Query-Config.`);
     return { online: false, reason: 'keine Query-Config' };
   }
-  const queryHost = normalizeQueryHost(q.host);
+  const queryHost = normalizeQueryHost(q.host, server.address);
   const queryPort = Number(q.port);
   const queryType = normalizeQueryType(q.type);
   try {
