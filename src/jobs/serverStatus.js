@@ -8,6 +8,7 @@ const {
 const {
   loadHostingServers,
   getLastActiveMs,
+  getDockerStatus,
   normalizeQueryHost,
   normalizeQueryType,
 } = require('../utils/hostingServers');
@@ -15,17 +16,27 @@ const {
 const QUERY_TIMEOUT_MS = 5000;
 
 async function queryServer(server, logger) {
+  const docker = getDockerStatus(server.container);
   const q = server.query;
-  if (!q?.type || !q.port) {
-    logger?.warn?.(`⚠️ Server-Status Query übersprungen (${server.id ?? server._dir}): keine Query-Config.`);
-    return { online: false, reason: 'keine Query-Config' };
+  const queryType = q?.type ?? 'none';
+
+  if (queryType === 'none' || !q?.port) {
+    if (queryType !== 'none') {
+      logger?.warn?.(`⚠️ Server-Status Query übersprungen (${server.id ?? server._dir}): kein Query-Port.`);
+    }
+    return { online: docker.running, dockerRunning: docker.running, reason: queryType === 'none' ? 'kein Query konfiguriert' : 'kein Query-Port' };
   }
+
+  if (!docker.running) {
+    return { online: false, dockerRunning: false, reason: 'Container offline' };
+  }
+
   const queryHost = normalizeQueryHost(q.host, server.address);
   const queryPort = Number(q.port);
-  const queryType = normalizeQueryType(q.type);
+  const normalizedType = normalizeQueryType(queryType);
   try {
     const state = await Gamedig.query({
-      type: queryType,
+      type: normalizedType,
       host: queryHost,
       port: queryPort,
       socketTimeout: QUERY_TIMEOUT_MS,
@@ -34,14 +45,21 @@ async function queryServer(server, logger) {
     });
     return {
       online: true,
+      dockerRunning: true,
       serverName: state.name,
       players: Array.isArray(state.players) ? state.players.length : (state.raw?.numplayers ?? 0),
       maxPlayers: state.maxplayers || server.maxPlayersFallback || 0,
     };
   } catch (err) {
     const reason = err?.message || String(err);
-    logger?.warn?.(`⚠️ Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${queryType} ${queryHost}:${queryPort} → ${reason}`);
-    return { online: false, reason };
+    logger?.warn?.(`⚠️ Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${normalizedType} ${queryHost}:${queryPort} → ${reason}`);
+    return {
+      online: docker.running,
+      dockerRunning: docker.running,
+      players: 0,
+      maxPlayers: server.maxPlayersFallback || 0,
+      reason,
+    };
   }
 }
 
@@ -72,10 +90,10 @@ function buildEmbed(results) {
       lines.push(`📛 ${r.serverName}`);
     }
     lines.push(`🌐 \`${r.address ?? '?'}\``);
-    if (r.online) {
-      lines.push(`👥 ${r.players}/${r.maxPlayers}`);
-    } else {
+    if (!r.online) {
       lines.push('💤 _offline_');
+    } else if (r.players !== undefined && r.players !== null) {
+      lines.push(`👥 ${r.players}/${r.maxPlayers ?? '?'}`);
     }
 
     embed.addFields({ name: header, value: lines.join('\n'), inline: false });

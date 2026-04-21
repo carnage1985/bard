@@ -9,6 +9,7 @@ services:
     volumes:
       - bard_data:/data
       - /hosting:/hosting:ro
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   bard_data:

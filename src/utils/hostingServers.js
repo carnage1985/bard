@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const HOSTING_DIR = process.env.HOSTING_DIR || '/hosting';
 
@@ -38,6 +39,20 @@ function normalizeQueryType(type) {
   if (!type) return type;
   const lower = String(type).toLowerCase();
   return QUERY_TYPE_ALIASES[lower] ?? type;
+}
+
+function getDockerStatus(containerName) {
+  if (!containerName) return { running: false, startedAt: '' };
+  try {
+    const out = execSync(
+      `docker inspect --format "{{.State.Status}}|{{.State.StartedAt}}" ${containerName}`,
+      { stdio: ['pipe', 'pipe', 'pipe'], timeout: 3000 }
+    ).toString().trim();
+    const [status, startedAt] = out.split('|');
+    return { running: status === 'running', startedAt: startedAt ?? '' };
+  } catch {
+    return { running: false, startedAt: '' };
+  }
 }
 
 function loadHostingServers(logger) {
@@ -103,6 +118,7 @@ module.exports = {
   HOSTING_DIR,
   loadHostingServers,
   getLastActiveMs,
+  getDockerStatus,
   normalizeQueryHost,
   normalizeQueryType,
 };
