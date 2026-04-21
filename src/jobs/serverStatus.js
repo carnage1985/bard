@@ -16,7 +16,7 @@ const {
 const QUERY_TIMEOUT_MS = 5000;
 
 async function queryServer(server, logger) {
-  const docker = getDockerStatus(server.container);
+  const docker = await getDockerStatus(server.container);
   const q = server.query;
   const queryType = q?.type ?? 'none';
 

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const http = require('http');
 
 const HOSTING_DIR = process.env.HOSTING_DIR || '/hosting';
 
@@ -42,17 +42,39 @@ function normalizeQueryType(type) {
 }
 
 function getDockerStatus(containerName) {
-  if (!containerName) return { running: false, startedAt: '' };
-  try {
-    const out = execSync(
-      `docker inspect --format "{{.State.Status}}|{{.State.StartedAt}}" ${containerName}`,
-      { stdio: ['pipe', 'pipe', 'pipe'], timeout: 3000 }
-    ).toString().trim();
-    const [status, startedAt] = out.split('|');
-    return { running: status === 'running', startedAt: startedAt ?? '' };
-  } catch {
-    return { running: false, startedAt: '' };
-  }
+  return new Promise((resolve) => {
+    if (!containerName) return resolve({ running: false, startedAt: '' });
+
+    const req = http.request(
+      {
+        socketPath: '/var/run/docker.sock',
+        path: `/containers/${encodeURIComponent(containerName)}/json`,
+        method: 'GET',
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            resolve({
+              running: json.State?.Status === 'running',
+              startedAt: json.State?.StartedAt ?? '',
+            });
+          } catch {
+            resolve({ running: false, startedAt: '' });
+          }
+        });
+      }
+    );
+
+    req.setTimeout(3000, () => {
+      req.destroy();
+      resolve({ running: false, startedAt: '' });
+    });
+    req.on('error', () => resolve({ running: false, startedAt: '' }));
+    req.end();
+  });
 }
 
 function loadHostingServers(logger) {
