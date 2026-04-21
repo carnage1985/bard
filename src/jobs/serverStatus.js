@@ -145,10 +145,14 @@ module.exports = (client, logger = console) => {
 
       let message = null;
       if (cfg.messageId) {
-        message = await channel.messages.fetch(cfg.messageId).catch(() => null);
+        message = await channel.messages.fetch(cfg.messageId, { force: true }).catch(() => null);
       }
       if (message) {
-        await message.edit({ content: '', embeds: [embed] });
+        const edited = await message.edit({ content: '', embeds: [embed] }).catch(() => null);
+        if (!edited) {
+          const sent = await channel.send({ embeds: [embed] });
+          updateMessageId(guildId, sent.id, logger);
+        }
       } else {
         const sent = await channel.send({ embeds: [embed] });
         updateMessageId(guildId, sent.id, logger);
