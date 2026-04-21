@@ -3,13 +3,13 @@ services:
     image: carnages/bard:latest
     container_name: bard
     restart: unless-stopped
+    network_mode: host
     environment:
       DISCORD_TOKEN: "TOKEN"
+      HOST_NETWORK: "true"
     volumes:
       - bard_data:/data
       - /hosting:/hosting:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
 volumes:
   bard_data:

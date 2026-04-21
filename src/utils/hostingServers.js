@@ -3,11 +3,14 @@ const path = require('path');
 
 const HOSTING_DIR = process.env.HOSTING_DIR || '/hosting';
 
+const HOST_NETWORK = ['1', 'true', 'yes'].includes(String(process.env.HOST_NETWORK ?? '').toLowerCase());
+
 function normalizeQueryHost(host) {
   if (!host) return '127.0.0.1';
   const lower = String(host).toLowerCase();
-  if (lower === '127.0.0.1' || lower === 'localhost' || lower === '::1') {
-    return 'host.docker.internal';
+  const isLoopback = lower === '127.0.0.1' || lower === 'localhost' || lower === '::1';
+  if (isLoopback) {
+    return HOST_NETWORK ? '127.0.0.1' : 'host.docker.internal';
   }
   return host;
 }
