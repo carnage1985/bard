@@ -1,4 +1,4 @@
-const { PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 const {
   watchConfig,
   setCharacterName,
@@ -7,31 +7,37 @@ const {
 } = require('../utils/voiceCharactersStore');
 const { syncMemberCharacterName } = require('./voiceCharacters');
 
-const PREFIX = '!dndchar';
-
-function parseChannelId(input) {
-  if (!input) return null;
-  const match = input.match(/^(?:<#)?(\d+)>?$/);
-  return match ? match[1] : null;
-}
-
-function parseUserId(input) {
-  if (!input) return null;
-  const match = input.match(/^(?:<@!?)?(\d+)>?$/);
-  return match ? match[1] : null;
-}
+const command = new SlashCommandBuilder()
+  .setName('dndchar')
+  .setDescription('Verwaltet D&D-Charakternamen für Sprachkanäle.')
+  .addSubcommand(sub => sub
+    .setName('set')
+    .setDescription('Setzt einen Charakternamen für einen User in einem Voice-Channel.')
+    .addChannelOption(opt => opt.setName('channel').setDescription('Voice-Channel').setRequired(true))
+    .addUserOption(opt => opt.setName('user').setDescription('Discord-User').setRequired(true))
+    .addStringOption(opt => opt.setName('name').setDescription('Charaktername (max. 32 Zeichen)').setRequired(true).setMaxLength(32))
+  )
+  .addSubcommand(sub => sub
+    .setName('remove')
+    .setDescription('Entfernt einen Charakternamen.')
+    .addChannelOption(opt => opt.setName('channel').setDescription('Voice-Channel').setRequired(true))
+    .addUserOption(opt => opt.setName('user').setDescription('Discord-User').setRequired(true))
+  )
+  .addSubcommand(sub => sub
+    .setName('list')
+    .setDescription('Listet alle Charakter-Mappings auf.')
+    .addChannelOption(opt => opt.setName('channel').setDescription('Voice-Channel (optional)').setRequired(false))
+  );
 
 function formatList(guildId, channelId, logger) {
   const data = listCharacters(guildId, channelId, logger);
   const lines = [];
-
   for (const [chId, users] of Object.entries(data)) {
     lines.push(`• <#${chId}>`);
     for (const [userId, name] of Object.entries(users)) {
       lines.push(`  ↳ <@${userId}> → **${name}**`);
     }
   }
-
   return lines.length ? lines.join('\n') : 'ℹ️ Keine Charakter-Mappings vorhanden.';
 }
 
@@ -53,81 +59,61 @@ async function getGuildMember(guild, userId) {
 module.exports = (client, logger = console) => {
   watchConfig(logger);
 
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
-    if (!message.content.toLowerCase().startsWith(PREFIX)) return;
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'dndchar') return;
 
-    if (!hasPermission(message.member)) {
-      await message.reply('❌ Du brauchst das Recht **Manage Nicknames** (oder Manage Server), um das zu nutzen.');
+    if (!hasPermission(interaction.member)) {
+      await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Nicknames** (oder Manage Server), um das zu nutzen.', ephemeral: true });
       return;
     }
 
-    const args = message.content.trim().split(/\s+/);
-    const action = (args[1] || '').toLowerCase();
-
-    if (!['set', 'remove', 'list', 'help'].includes(action)) {
-      await message.reply('Nutze `!dndchar set <#voice> <@user> <Charaktername>`, `!dndchar remove <#voice> <@user>` oder `!dndchar list [#voice]`.');
-      return;
-    }
-
+    const sub = interaction.options.getSubcommand();
     try {
-      if (action === 'set') {
-        const channelId = parseChannelId(args[2]);
-        const userId = parseUserId(args[3]);
-        const characterName = args.slice(4).join(' ').trim();
+      if (sub === 'set') {
+        const channel = interaction.options.getChannel('channel');
+        const user = interaction.options.getUser('user');
+        const characterName = interaction.options.getString('name');
 
-        if (!channelId || !userId || !characterName) {
-          await message.reply('❌ Bitte nutze `!dndchar set <#voice> <@user> <Charaktername>`');
-          return;
+        setCharacterName(interaction.guildId, channel.id, user.id, characterName, logger);
+        const member = await getGuildMember(interaction.guild, user.id);
+        if (member?.voice?.channelId === channel.id) {
+          await syncMemberCharacterName(member, channel.id, logger);
         }
-        if (characterName.length > 32) {
-          await message.reply('❌ Charaktername zu lang (max. 32 Zeichen, Discord-Nickname Limit).');
-          return;
-        }
-
-        setCharacterName(message.guild.id, channelId, userId, characterName, logger);
-        const member = await getGuildMember(message.guild, userId);
-        if (member?.voice?.channelId === channelId) {
-          await syncMemberCharacterName(member, channelId, logger);
-        }
-        logger.info(`📝 D&D-Char gesetzt: guild=${message.guild.id} channel=${channelId} user=${userId} → ${characterName}`);
-        await message.reply(`✅ Gespeichert: <@${userId}> wird in <#${channelId}> zu **${characterName}**.`);
+        logger.info(`📝 D&D-Char gesetzt: guild=${interaction.guildId} channel=${channel.id} user=${user.id} → ${characterName}`);
+        await interaction.reply({ content: `✅ Gespeichert: <@${user.id}> wird in <#${channel.id}> zu **${characterName}**.`, ephemeral: true });
         return;
       }
 
-      if (action === 'remove') {
-        const channelId = parseChannelId(args[2]);
-        const userId = parseUserId(args[3]);
+      if (sub === 'remove') {
+        const channel = interaction.options.getChannel('channel');
+        const user = interaction.options.getUser('user');
 
-        if (!channelId || !userId) {
-          await message.reply('❌ Bitte nutze `!dndchar remove <#voice> <@user>`');
-          return;
-        }
-
-        const removed = removeCharacterName(message.guild.id, channelId, userId, logger);
+        const removed = removeCharacterName(interaction.guildId, channel.id, user.id, logger);
         if (!removed) {
-          await message.reply('ℹ️ Kein Eintrag gefunden, es wurde nichts gelöscht.');
+          await interaction.reply({ content: 'ℹ️ Kein Eintrag gefunden, es wurde nichts gelöscht.', ephemeral: true });
           return;
         }
-
-        const member = await getGuildMember(message.guild, userId);
-        if (member?.voice?.channelId === channelId) {
-          await syncMemberCharacterName(member, channelId, logger);
+        const member = await getGuildMember(interaction.guild, user.id);
+        if (member?.voice?.channelId === channel.id) {
+          await syncMemberCharacterName(member, channel.id, logger);
         }
-
-        logger.info(`🗑️ D&D-Char entfernt: guild=${message.guild.id} channel=${channelId} user=${userId}`);
-        await message.reply(`✅ Mapping entfernt für <@${userId}> in <#${channelId}>.`);
+        logger.info(`🗑️ D&D-Char entfernt: guild=${interaction.guildId} channel=${channel.id} user=${user.id}`);
+        await interaction.reply({ content: `✅ Mapping entfernt für <@${user.id}> in <#${channel.id}>.`, ephemeral: true });
         return;
       }
 
-      if (action === 'list' || action === 'help') {
-        const channelId = parseChannelId(args[2]);
-        const listText = formatList(message.guild.id, channelId, logger);
-        await message.reply(listText);
+      if (sub === 'list') {
+        const channel = interaction.options.getChannel('channel');
+        const listText = formatList(interaction.guildId, channel?.id ?? null, logger);
+        await interaction.reply({ content: listText, ephemeral: true });
       }
     } catch (err) {
-      logger.error('❌ Fehler im !dndchar-Command:', err);
-      await message.reply('❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.');
+      logger.error('❌ Fehler im /dndchar-Command:', err);
+      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', ephemeral: true };
+      if (interaction.replied || interaction.deferred) await interaction.editReply(errMsg).catch(() => {});
+      else await interaction.reply(errMsg).catch(() => {});
     }
   });
 };
+
+module.exports.command = command;

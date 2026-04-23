@@ -1,4 +1,4 @@
-const { ChannelType, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 const {
   watchConfig,
   setWaitingChannel,
@@ -6,13 +6,24 @@ const {
   listWaitingChannels,
 } = require('../utils/voiceWaitingStore');
 
-const PREFIX = '!voicewait';
-
-function parseChannelId(input) {
-  if (!input) return null;
-  const match = input.match(/^(?:<#)?(\d+)>?$/);
-  return match ? match[1] : null;
-}
+const command = new SlashCommandBuilder()
+  .setName('voicewait')
+  .setDescription('Konfiguriert den Alleine-Ping für Voice-Channels.')
+  .addSubcommand(sub => sub
+    .setName('set')
+    .setDescription('Aktiviert den Alleine-Ping für einen Voice-Channel.')
+    .addChannelOption(opt => opt.setName('channel').setDescription('Voice-Channel').setRequired(true))
+    .addIntegerOption(opt => opt.setName('minutes').setDescription('Minuten alleine bis zum Ping (1–240)').setRequired(true).setMinValue(1).setMaxValue(240))
+  )
+  .addSubcommand(sub => sub
+    .setName('remove')
+    .setDescription('Deaktiviert den Alleine-Ping für einen Voice-Channel.')
+    .addChannelOption(opt => opt.setName('channel').setDescription('Voice-Channel').setRequired(true))
+  )
+  .addSubcommand(sub => sub
+    .setName('list')
+    .setDescription('Zeigt alle konfigurierten Voice-Channels.')
+  );
 
 function hasPermission(member) {
   return member.permissions.has(PermissionsBitField.Flags.ManageChannels)
@@ -26,94 +37,62 @@ function formatList(guildId, logger) {
     const notifyChannel = entry?.notifyChannelId ? `<#${entry.notifyChannelId}>` : '*(unbekannt)*';
     return `• <#${channelId}> → Ping nach **${waitMinutes}** Min. alleine → Benachrichtigung in ${notifyChannel}`;
   });
-
-  return lines.length
-    ? lines.join('\n')
-    : 'ℹ️ Keine Voice-Channels für den Alleine-Ping konfiguriert.';
+  return lines.length ? lines.join('\n') : 'ℹ️ Keine Voice-Channels für den Alleine-Ping konfiguriert.';
 }
 
 module.exports = (client, logger = console) => {
   watchConfig(logger);
 
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
-    const normalizedContent = message.content.trim();
-    if (!normalizedContent.toLowerCase().startsWith(PREFIX)) return;
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'voicewait') return;
 
-    if (!hasPermission(message.member)) {
-      await message.reply('❌ Du brauchst das Recht **Manage Channels** oder **Manage Server**, um das zu nutzen.');
+    if (!hasPermission(interaction.member)) {
+      await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Channels** oder **Manage Server**, um das zu nutzen.', ephemeral: true });
       return;
     }
 
-    const remainder = normalizedContent.slice(PREFIX.length).trim();
-    const args = remainder ? remainder.split(/\s+/) : [];
-    const action = (args[0] || '').toLowerCase();
-
-    if (!['set', 'remove', 'list', 'help'].includes(action)) {
-      await message.reply('Nutze `!voicewait set <voiceChannelId> <minuten>`, `!voicewait remove <voiceChannelId>` oder `!voicewait list`.');
-      return;
-    }
-
+    const sub = interaction.options.getSubcommand();
     try {
-      if (action === 'set') {
-        const channelId = parseChannelId(args[1]);
-        const waitMinutes = Number.parseInt(args[2], 10);
-        const channel = channelId
-          ? await message.guild.channels.fetch(channelId).catch(() => null)
-          : null;
-
-        if (!channel || !Number.isInteger(waitMinutes)) {
-          await message.reply('❌ Bitte nutze `!voicewait set <voiceChannelId> <minuten>`.');
-          return;
-        }
-
-        if (waitMinutes < 1 || waitMinutes > 240) {
-          await message.reply('❌ Minuten müssen zwischen **1** und **240** liegen.');
-          return;
-        }
+      if (sub === 'set') {
+        const channel = interaction.options.getChannel('channel');
+        const waitMinutes = interaction.options.getInteger('minutes');
 
         if (![ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)) {
-          await message.reply('❌ Das angegebene Ziel ist kein Voice- oder Stage-Channel.');
+          await interaction.reply({ content: '❌ Das angegebene Ziel ist kein Voice- oder Stage-Channel.', ephemeral: true });
           return;
         }
 
-        setWaitingChannel(message.guild.id, channel.id, waitMinutes, message.channel.id, logger);
+        setWaitingChannel(interaction.guildId, channel.id, waitMinutes, interaction.channelId, logger);
         client.emit('voiceWaitConfigChanged', channel);
-        logger.info(`📝 Voice-Wait gesetzt: guild=${message.guild.id} channel=${channel.id} waitMinutes=${waitMinutes} notifyChannel=${message.channel.id}`);
-        await message.reply(`✅ <#${channel.id}> wird jetzt überwacht. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, kommt ein \`@here\`-Ping hier in <#${message.channel.id}>.`);
+        logger.info(`📝 Voice-Wait gesetzt: guild=${interaction.guildId} channel=${channel.id} waitMinutes=${waitMinutes} notifyChannel=${interaction.channelId}`);
+        await interaction.reply({ content: `✅ <#${channel.id}> wird jetzt überwacht. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, kommt ein \`@here\`-Ping hier in <#${interaction.channelId}>.`, ephemeral: true });
         return;
       }
 
-      if (action === 'remove') {
-        const channelId = parseChannelId(args[1]);
-        const channel = channelId
-          ? await message.guild.channels.fetch(channelId).catch(() => null)
-          : null;
-
-        if (!channel) {
-          await message.reply('❌ Bitte nutze `!voicewait remove <voiceChannelId>`.');
-          return;
-        }
-
-        const removed = removeWaitingChannel(message.guild.id, channel.id, logger);
+      if (sub === 'remove') {
+        const channel = interaction.options.getChannel('channel');
+        const removed = removeWaitingChannel(interaction.guildId, channel.id, logger);
         if (!removed) {
-          await message.reply('ℹ️ Für diesen Channel war kein Alleine-Ping hinterlegt.');
+          await interaction.reply({ content: 'ℹ️ Für diesen Channel war kein Alleine-Ping hinterlegt.', ephemeral: true });
           return;
         }
-
         client.emit('voiceWaitConfigChanged', channel);
-        logger.info(`🗑️ Voice-Wait entfernt: guild=${message.guild.id} channel=${channel.id}`);
-        await message.reply(`✅ Alleine-Ping für <#${channel.id}> entfernt.`);
+        logger.info(`🗑️ Voice-Wait entfernt: guild=${interaction.guildId} channel=${channel.id}`);
+        await interaction.reply({ content: `✅ Alleine-Ping für <#${channel.id}> entfernt.`, ephemeral: true });
         return;
       }
 
-      if (action === 'list' || action === 'help') {
-        const listText = formatList(message.guild.id, logger);
-        await message.reply(`${listText}\n\nHilfe: \`!voicewait set <voiceChannelId> <minuten>\``);
+      if (sub === 'list') {
+        const listText = formatList(interaction.guildId, logger);
+        await interaction.reply({ content: listText, ephemeral: true });
       }
     } catch (err) {
-      logger.error('❌ Fehler im !voicewait-Command:', err);
-      await message.reply('❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.');
+      logger.error('❌ Fehler im /voicewait-Command:', err);
+      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', ephemeral: true };
+      if (interaction.replied || interaction.deferred) await interaction.editReply(errMsg).catch(() => {});
+      else await interaction.reply(errMsg).catch(() => {});
     }
   });
 };
+
+module.exports.command = command;

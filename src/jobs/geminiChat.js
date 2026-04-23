@@ -1,9 +1,10 @@
 // src/jobs/geminiChat.js
+const { SlashCommandBuilder } = require('discord.js');
 const Groq = require('groq-sdk');
 
 const MODEL = 'llama-3.3-70b-versatile';
-const MAX_HISTORY_PAIRS = 10; // wie viele Gesprächspaare pro Kanal gespeichert werden
-const HISTORY_TTL_MS = 30 * 60 * 1000; // 30 Minuten Inaktivität löscht den Verlauf
+const MAX_HISTORY_PAIRS = 10;
+const HISTORY_TTL_MS = 30 * 60 * 1000;
 const DISCORD_MAX_LENGTH = 2000;
 
 const SYSTEM_PROMPT = `Du bist Bard, ein charismatischer Barde aus der Welt von Dungeons & Dragons.
@@ -12,6 +13,15 @@ Du nennst den Gesprächspartner gerne "tapferer Recke", "werte Seele", "guter Fr
 Du beziehst dich auf deine Abenteuer, deine Laute und die Tavernen, in denen du gespielt hast.
 Du beantwortest alle Fragen vollständig und hilfreich – nur eben im Stil eines Barden.
 Wenn dir jemand eine nüchterne, moderne Frage stellt, beantworte sie trotzdem korrekt, aber verpacke sie in deine bardische Erzählweise.`;
+
+const command = new SlashCommandBuilder()
+  .setName('chat')
+  .setDescription('Chattet mit Bard via AI.')
+  .addStringOption(opt => opt
+    .setName('message')
+    .setDescription('Deine Nachricht (oder "reset" um den Verlauf zu löschen)')
+    .setRequired(true)
+  );
 
 module.exports = (client, logger = console) => {
   const apiKey = process.env.GROQ_API_KEY;
@@ -25,10 +35,12 @@ module.exports = (client, logger = console) => {
   // Map<key, { history: Array<{role, content}>, lastActivity: number }>
   const conversations = new Map();
 
-  function conversationKey(message) {
-    return message.channel.isDMBased()
-      ? `dm_${message.author.id}`
-      : `ch_${message.channel.id}`;
+  function conversationKey(source) {
+    // source kann eine message oder interaction sein
+    if (source.channel?.isDMBased?.() || source.channelId === null) {
+      return `dm_${source.user?.id ?? source.author?.id}`;
+    }
+    return `ch_${source.channelId ?? source.channel?.id}`;
   }
 
   function getHistory(key) {
@@ -49,7 +61,6 @@ module.exports = (client, logger = console) => {
     }
     entry.history.push({ role, content });
     entry.lastActivity = Date.now();
-    // Ältestes Paar entfernen wenn zu lang
     if (entry.history.length > MAX_HISTORY_PAIRS * 2) {
       entry.history.splice(0, 2);
     }
@@ -59,37 +70,63 @@ module.exports = (client, logger = console) => {
     conversations.delete(key);
   }
 
-  async function sendChunked(message, text) {
-    if (text.length <= DISCORD_MAX_LENGTH) {
-      await message.reply(text);
-      return;
-    }
-    const chunks = text.match(/[\s\S]{1,1990}/g) || [];
-    for (let i = 0; i < chunks.length; i++) {
-      if (i === 0) await message.reply(chunks[i]);
-      else await message.channel.send(chunks[i]);
-    }
+  async function askGroq(history, userText) {
+    const completion = await groq.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...history,
+        { role: 'user', content: userText },
+      ],
+    });
+    return completion.choices[0].message.content;
   }
 
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+  function splitChunks(text) {
+    return text.match(/[\s\S]{1,1990}/g) || [];
+  }
 
-    const isMentioned = message.mentions.has(client.user);
-    const isCommand = message.content.toLowerCase().startsWith('!chat');
+  // ── Slash-Command /chat ──────────────────────────────────────────────────
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'chat') return;
 
-    if (!isMentioned && !isCommand) return;
+    const userText = interaction.options.getString('message');
+    const key = conversationKey(interaction);
 
-    // Nachrichtentext extrahieren
-    let userText;
-    if (isMentioned) {
-      userText = message.content.replace(/<@!?\d+>/g, '').trim();
-    } else {
-      userText = message.content.slice('!chat'.length).trim();
+    if (userText.toLowerCase() === 'reset') {
+      clearHistory(key);
+      await interaction.reply({ content: '🎶 Ein neues Lied beginnt! Ich habe unsere bisherige Geschichte aus meinem Gedächtnis getilgt, werte Seele.', ephemeral: true });
+      logger.info(`🗑️ Chat-Verlauf zurückgesetzt von ${interaction.user.tag}`);
+      return;
     }
 
+    await interaction.deferReply();
+    const history = getHistory(key);
+    try {
+      const responseText = await askGroq(history, userText);
+      appendHistory(key, 'user', userText);
+      appendHistory(key, 'assistant', responseText);
+
+      const chunks = splitChunks(responseText);
+      await interaction.editReply(chunks[0]);
+      for (const chunk of chunks.slice(1)) {
+        await interaction.followUp(chunk);
+      }
+      logger.info(`🎶 /chat von ${interaction.user.tag}: "${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
+    } catch (err) {
+      logger.error('❌ Fehler im /chat-Command:', err);
+      await interaction.editReply('❌ Fehler bei der Anfrage. Bitte versuche es später nochmal.');
+    }
+  });
+
+  // ── @Mention ─────────────────────────────────────────────────────────────
+  client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.mentions.has(client.user)) return;
+
+    const userText = message.content.replace(/<@!?\d+>/g, '').trim();
     const key = conversationKey(message);
 
-    // !chat reset – Gesprächsverlauf löschen
     if (userText.toLowerCase() === 'reset') {
       clearHistory(key);
       await message.reply('🎶 Ein neues Lied beginnt! Ich habe unsere bisherige Geschichte aus meinem Gedächtnis getilgt, werte Seele.');
@@ -98,35 +135,28 @@ module.exports = (client, logger = console) => {
     }
 
     if (!userText) {
-      await message.reply('🎵 Ah, ein stiller Gruß! Sprecht, tapferer Recke – was führt Euch zu diesem bescheidenen Barden? Versucht es mit `!chat Hallo!`');
+      await message.reply('🎵 Ah, ein stiller Gruß! Sprecht, tapferer Recke – was führt Euch zu diesem bescheidenen Barden?');
       return;
     }
 
     const history = getHistory(key);
-
     try {
       await message.channel.sendTyping();
-
-      const completion = await groq.chat.completions.create({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...history,
-          { role: 'user', content: userText },
-        ],
-      });
-
-      const responseText = completion.choices[0].message.content;
-
+      const responseText = await askGroq(history, userText);
       appendHistory(key, 'user', userText);
       appendHistory(key, 'assistant', responseText);
 
-      await sendChunked(message, responseText);
-
-      logger.info(`🎶 Chat von ${message.author.tag}: "${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
+      const chunks = splitChunks(responseText);
+      await message.reply(chunks[0]);
+      for (const chunk of chunks.slice(1)) {
+        await message.channel.send(chunk);
+      }
+      logger.info(`🎶 @mention von ${message.author.tag}: "${userText.slice(0, 60)}${userText.length > 60 ? '…' : ''}"`);
     } catch (err) {
-      logger.error('❌ Fehler im Chat:', err);
+      logger.error('❌ Fehler im Chat (@mention):', err);
       await message.reply('❌ Fehler bei der Anfrage. Bitte versuche es später nochmal.');
     }
   });
 };
+
+module.exports.command = command;

@@ -1,4 +1,4 @@
-const { ChannelType, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 const Gamedig = require('gamedig');
 const {
   watchConfig,
@@ -8,80 +8,75 @@ const {
 } = require('../utils/serverStatusStore');
 const { loadHostingServers, HOSTING_DIR, normalizeQueryHost, normalizeQueryType } = require('../utils/hostingServers');
 
-const PREFIX = '!serverstatus';
 const MIN_INTERVAL = 10;
 const MAX_INTERVAL = 3600;
-
-function parseChannelId(input) {
-  if (!input) return null;
-  const match = input.match(/^(?:<#)?(\d+)>?$/);
-  return match ? match[1] : null;
-}
 
 function hasPermission(member) {
   return member.permissions.has(PermissionsBitField.Flags.ManageChannels)
     || member.permissions.has(PermissionsBitField.Flags.ManageGuild);
 }
 
+const command = new SlashCommandBuilder()
+  .setName('serverstatus')
+  .setDescription('Verwaltet das Server-Status-Embed.')
+  .addSubcommand(sub => sub
+    .setName('set')
+    .setDescription('Aktiviert das Server-Status-Embed.')
+    .addIntegerOption(opt => opt
+      .setName('seconds')
+      .setDescription(`Update-Intervall (${MIN_INTERVAL}–${MAX_INTERVAL} Sekunden)`)
+      .setRequired(true)
+      .setMinValue(MIN_INTERVAL)
+      .setMaxValue(MAX_INTERVAL)
+    )
+    .addChannelOption(opt => opt
+      .setName('channel')
+      .setDescription('Ziel-Channel (Standard: aktueller Channel)')
+      .setRequired(false)
+    )
+  )
+  .addSubcommand(sub => sub.setName('remove').setDescription('Entfernt das Server-Status-Embed.'))
+  .addSubcommand(sub => sub.setName('refresh').setDescription('Löst ein sofortiges Update aus.'))
+  .addSubcommand(sub => sub.setName('list').setDescription('Zeigt Konfiguration und gefundene Server.'))
+  .addSubcommand(sub => sub.setName('test').setDescription('Testet alle konfigurierten Server direkt.'));
+
 module.exports = (client, logger = console) => {
   watchConfig(logger);
 
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
-    const normalized = message.content.trim();
-    if (!normalized.toLowerCase().startsWith(PREFIX)) return;
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'serverstatus') return;
 
-    if (!hasPermission(message.member)) {
-      await message.reply('❌ Du brauchst **Manage Channels** oder **Manage Server**, um das zu nutzen.');
+    if (!hasPermission(interaction.member)) {
+      await interaction.reply({ content: '❌ Du brauchst **Manage Channels** oder **Manage Server**, um das zu nutzen.', ephemeral: true });
       return;
     }
 
-    const remainder = normalized.slice(PREFIX.length).trim();
-    const args = remainder ? remainder.split(/\s+/) : [];
-    const action = (args[0] || '').toLowerCase();
-
-    if (!['set', 'remove', 'refresh', 'list', 'test', 'help'].includes(action)) {
-      await message.reply('Nutze `!serverstatus set <sekunden> [channelId]`, `!serverstatus remove`, `!serverstatus refresh`, `!serverstatus test` oder `!serverstatus list`.');
-      return;
-    }
-
+    const sub = interaction.options.getSubcommand();
     try {
-      if (action === 'set') {
-        const intervalSeconds = Number.parseInt(args[1], 10);
-        if (!Number.isInteger(intervalSeconds) || intervalSeconds < MIN_INTERVAL || intervalSeconds > MAX_INTERVAL) {
-          await message.reply(`❌ Intervall muss eine Zahl zwischen **${MIN_INTERVAL}** und **${MAX_INTERVAL}** Sekunden sein.`);
+      if (sub === 'set') {
+        const intervalSeconds = interaction.options.getInteger('seconds');
+        const channelOption = interaction.options.getChannel('channel');
+        const targetChannel = channelOption
+          ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+
+        if (!targetChannel) {
+          await interaction.reply({ content: '❌ Channel nicht gefunden.', ephemeral: true });
           return;
         }
-
-        let targetChannel = message.channel;
-        if (args[2]) {
-          const channelId = parseChannelId(args[2]);
-          const fetched = channelId
-            ? await message.guild.channels.fetch(channelId).catch(() => null)
-            : null;
-          if (!fetched) {
-            await message.reply('❌ Angegebener Channel nicht gefunden.');
-            return;
-          }
-          targetChannel = fetched;
-        }
-
         if (![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(targetChannel.type)) {
-          await message.reply('❌ Ziel muss ein normaler Text-Channel sein.');
+          await interaction.reply({ content: '❌ Ziel muss ein normaler Text-Channel sein.', ephemeral: true });
           return;
         }
 
-        const existing = getStatusConfig(message.guild.id, logger);
+        const existing = getStatusConfig(interaction.guildId, logger);
         if (existing?.messageId && existing.channelId !== targetChannel.id) {
           try {
-            const oldChannel = await message.guild.channels.fetch(existing.channelId).catch(() => null);
+            const oldChannel = await interaction.guild.channels.fetch(existing.channelId).catch(() => null);
             if (oldChannel) {
               const oldMsg = await oldChannel.messages.fetch(existing.messageId).catch(() => null);
               if (oldMsg) await oldMsg.delete().catch(() => null);
             }
-          } catch {
-            // ignore cleanup errors
-          }
+          } catch { /* ignore cleanup errors */ }
         }
 
         let messageId = null;
@@ -94,57 +89,71 @@ module.exports = (client, logger = console) => {
           messageId = sent.id;
         }
 
-        setStatusConfig(message.guild.id, targetChannel.id, intervalSeconds, messageId, logger);
-        client.emit('serverStatusConfigChanged', message.guild.id);
-        logger.info(`📝 Server-Status gesetzt: guild=${message.guild.id} channel=${targetChannel.id} intervalSeconds=${intervalSeconds}`);
-        await message.reply(`✅ Server-Status wird alle **${intervalSeconds}s** in <#${targetChannel.id}> aktualisiert.`);
+        setStatusConfig(interaction.guildId, targetChannel.id, intervalSeconds, messageId, logger);
+        client.emit('serverStatusConfigChanged', interaction.guildId);
+        logger.info(`📝 Server-Status gesetzt: guild=${interaction.guildId} channel=${targetChannel.id} intervalSeconds=${intervalSeconds}`);
+        await interaction.reply({ content: `✅ Server-Status wird alle **${intervalSeconds}s** in <#${targetChannel.id}> aktualisiert.`, ephemeral: true });
         return;
       }
 
-      if (action === 'remove') {
-        const existing = getStatusConfig(message.guild.id, logger);
+      if (sub === 'remove') {
+        const existing = getStatusConfig(interaction.guildId, logger);
         if (!existing) {
-          await message.reply('ℹ️ Kein Server-Status konfiguriert.');
+          await interaction.reply({ content: 'ℹ️ Kein Server-Status konfiguriert.', ephemeral: true });
           return;
         }
-
         if (existing.messageId) {
           try {
-            const ch = await message.guild.channels.fetch(existing.channelId).catch(() => null);
+            const ch = await interaction.guild.channels.fetch(existing.channelId).catch(() => null);
             if (ch) {
               const msg = await ch.messages.fetch(existing.messageId).catch(() => null);
               if (msg) await msg.delete().catch(() => null);
             }
-          } catch {
-            // ignore cleanup errors
-          }
+          } catch { /* ignore cleanup errors */ }
         }
-
-        removeStatusConfig(message.guild.id, logger);
-        client.emit('serverStatusConfigChanged', message.guild.id);
-        logger.info(`🗑️ Server-Status entfernt: guild=${message.guild.id}`);
-        await message.reply('✅ Server-Status entfernt.');
+        removeStatusConfig(interaction.guildId, logger);
+        client.emit('serverStatusConfigChanged', interaction.guildId);
+        logger.info(`🗑️ Server-Status entfernt: guild=${interaction.guildId}`);
+        await interaction.reply({ content: '✅ Server-Status entfernt.', ephemeral: true });
         return;
       }
 
-      if (action === 'refresh') {
-        const existing = getStatusConfig(message.guild.id, logger);
+      if (sub === 'refresh') {
+        const existing = getStatusConfig(interaction.guildId, logger);
         if (!existing) {
-          await message.reply('ℹ️ Kein Server-Status konfiguriert. Nutze `!serverstatus set <sekunden> [channelId]`.');
+          await interaction.reply({ content: 'ℹ️ Kein Server-Status konfiguriert. Nutze `/serverstatus set`.', ephemeral: true });
           return;
         }
-        client.emit('serverStatusRefreshRequested', message.guild.id);
-        await message.reply('🔄 Update angestoßen.');
+        client.emit('serverStatusRefreshRequested', interaction.guildId);
+        await interaction.reply({ content: '🔄 Update angestoßen.', ephemeral: true });
         return;
       }
 
-      if (action === 'test') {
+      if (sub === 'list') {
+        const existing = getStatusConfig(interaction.guildId, logger);
+        const servers = loadHostingServers(logger);
+        const lines = [];
+        if (existing) {
+          lines.push(`📋 **Konfiguriert:** <#${existing.channelId}> alle ${existing.intervalSeconds}s`);
+        } else {
+          lines.push('📋 **Konfiguriert:** *(nicht gesetzt)*');
+        }
+        lines.push('');
+        lines.push(`**Gefundene Server in \`${HOSTING_DIR}\`:** ${servers.length}`);
+        for (const s of servers) {
+          lines.push(`• ${s.icon ? s.icon + ' ' : ''}**${s.name ?? s._dir}** — \`${s.address ?? '?'}\``);
+        }
+        await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+        return;
+      }
+
+      if (sub === 'test') {
+        await interaction.deferReply({ ephemeral: true });
         const servers = loadHostingServers(logger);
         if (!servers.length) {
-          await message.reply(`ℹ️ Keine Server in \`${HOSTING_DIR}\` gefunden.`);
+          await interaction.editReply(`ℹ️ Keine Server in \`${HOSTING_DIR}\` gefunden.`);
           return;
         }
-        await message.reply(`🔍 Teste ${servers.length} Server …`);
         const lines = [];
         for (const s of servers) {
           const label = `${s.icon ? s.icon + ' ' : ''}**${s.name ?? s._dir}**`;
@@ -157,53 +166,31 @@ module.exports = (client, logger = console) => {
           const port = Number(q.port);
           const type = normalizeQueryType(q.type);
           try {
-            const state = await Gamedig.query({
-              type,
-              host,
-              port,
-              socketTimeout: 5000,
-              attemptTimeout: 5000,
-              maxAttempts: 1,
-            });
+            const state = await Gamedig.query({ type, host, port, socketTimeout: 5000, attemptTimeout: 5000, maxAttempts: 1 });
             const players = Array.isArray(state.players) ? state.players.length : (state.raw?.numplayers ?? 0);
             const max = state.maxplayers || s.maxPlayersFallback || 0;
             lines.push(`${label} — 🟢 \`${type}://${host}:${port}\` · ${players}/${max} · "${state.name ?? ''}"`);
           } catch (err) {
-            const msg = err?.message || String(err);
-            lines.push(`${label} — 🔴 \`${type}://${host}:${port}\` · \`${msg}\``);
+            lines.push(`${label} — 🔴 \`${type}://${host}:${port}\` · \`${err?.message || String(err)}\``);
           }
         }
         const out = lines.join('\n');
         if (out.length < 1900) {
-          await message.channel.send(out);
+          await interaction.editReply(out);
         } else {
-          for (const line of lines) await message.channel.send(line);
+          await interaction.editReply(lines[0]);
+          for (const line of lines.slice(1)) {
+            await interaction.followUp({ content: line, ephemeral: true });
+          }
         }
-        return;
-      }
-
-      if (action === 'list' || action === 'help') {
-        const existing = getStatusConfig(message.guild.id, logger);
-        const servers = loadHostingServers(logger);
-        const lines = [];
-        if (existing) {
-          lines.push(`📋 **Konfiguriert:** <#${existing.channelId}> alle ${existing.intervalSeconds}s`);
-        } else {
-          lines.push('📋 **Konfiguriert:** *(nicht gesetzt)*');
-        }
-        lines.push('');
-        lines.push(`**Gefundene Server in \`${HOSTING_DIR}\`:** ${servers.length}`);
-        for (const s of servers) {
-          const icon = s.icon ? `${s.icon} ` : '';
-          lines.push(`• ${icon}**${s.name ?? s._dir}** — \`${s.address ?? '?'}\``);
-        }
-        lines.push('');
-        lines.push('Hilfe: `!serverstatus set <sekunden> [channelId]`');
-        await message.reply(lines.join('\n'));
       }
     } catch (err) {
-      logger.error('❌ Fehler im !serverstatus-Command:', err);
-      await message.reply('❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.');
+      logger.error('❌ Fehler im /serverstatus-Command:', err);
+      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', ephemeral: true };
+      if (interaction.deferred || interaction.replied) await interaction.editReply(errMsg).catch(() => {});
+      else await interaction.reply(errMsg).catch(() => {});
     }
   });
 };
+
+module.exports.command = command;

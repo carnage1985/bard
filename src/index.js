@@ -25,11 +25,11 @@ registerCriticalErrorHandlers(client, logger, {
   userId: '324155395709075457',
 });
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   const ts = new Date().toISOString();
   // ✅ ab jetzt logger statt console.* verwenden
   logger.info(`🟢 [ClientReady] Bard geladen & eingeloggt als ${c.user.tag} (${c.user.id}) @ ${ts}`);
-  onClientReady(c, logger); // logger an ready.js weitergeben
+  await onClientReady(c, logger); // logger an ready.js weitergeben
 });
 
 client.login(process.env.BOT_TOKEN);

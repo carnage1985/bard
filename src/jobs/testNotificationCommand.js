@@ -1,55 +1,48 @@
-const { PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
 
-const PREFIX = '!testnotification';
 const OWNER_USER_ID = process.env.OWNER_USER_ID || '324155395709075457';
+
+const command = new SlashCommandBuilder()
+  .setName('testnotification')
+  .setDescription('Sendet eine Test-DM an den Bot-Besitzer. (Nur Admins)')
+  .addStringOption(opt => opt
+    .setName('message')
+    .setDescription('Nachrichtentext')
+    .setRequired(true)
+  );
 
 function hasPermission(member) {
   return member?.permissions?.has(PermissionsBitField.Flags.Administrator);
 }
 
-function parseNotificationText(content) {
-  const remainder = content.slice(PREFIX.length).trim();
-  if (!remainder) return '';
-
-  const quotedMatch = remainder.match(/^"([\s\S]*)"$/);
-  return (quotedMatch ? quotedMatch[1] : remainder).trim();
-}
-
 module.exports = (client, logger = console) => {
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'testnotification') return;
 
-    const normalizedContent = message.content.trim();
-    if (!normalizedContent.toLowerCase().startsWith(PREFIX)) return;
-
-    if (!hasPermission(message.member)) {
-      await message.reply('❌ Nur Admins mit dem Recht **Administrator** duerfen das nutzen.');
+    if (!hasPermission(interaction.member)) {
+      await interaction.reply({ content: '❌ Nur Admins mit dem Recht **Administrator** dürfen das nutzen.', ephemeral: true });
       return;
     }
 
-    const notificationText = parseNotificationText(normalizedContent);
-    if (!notificationText) {
-      await message.reply('❌ Bitte nutze `!testNotification "Text"`.');
-      return;
-    }
-
+    const notificationText = interaction.options.getString('message');
     try {
       const user = await client.users.fetch(OWNER_USER_ID);
       await user.send({
         content: [
           'Test-Benachrichtigung vom Bot',
-          `Von: ${message.author.tag} (${message.author.id})`,
-          `Server: ${message.guild.name} (${message.guild.id})`,
+          `Von: ${interaction.user.tag} (${interaction.user.id})`,
+          `Server: ${interaction.guild.name} (${interaction.guildId})`,
           '',
           notificationText,
         ].join('\n'),
       });
-
-      logger.info(`📨 Test-Notification gesendet von ${message.author.tag} (${message.author.id})`);
-      await message.reply('✅ Test-Benachrichtigung wurde per DM gesendet.');
+      logger.info(`📨 Test-Notification gesendet von ${interaction.user.tag} (${interaction.user.id})`);
+      await interaction.reply({ content: '✅ Test-Benachrichtigung wurde per DM gesendet.', ephemeral: true });
     } catch (err) {
-      logger.error('❌ Fehler im !testNotification-Command:', err);
-      await message.reply('❌ Die Test-Benachrichtigung konnte nicht gesendet werden.');
+      logger.error('❌ Fehler im /testnotification-Command:', err);
+      await interaction.reply({ content: '❌ Die Test-Benachrichtigung konnte nicht gesendet werden.', ephemeral: true });
     }
   });
 };
+
+module.exports.command = command;

@@ -1,23 +1,24 @@
 // src/jobs/ping.js
+const { SlashCommandBuilder } = require('discord.js');
+
+const command = new SlashCommandBuilder()
+  .setName('ping')
+  .setDescription('Zeigt die Bot-Latenz an.');
+
 module.exports = (client, logger = console) => {
-  client.on('messageCreate', async (message) => {
-    // Bots ignorieren
-    if (message.author.bot) return;
-
-    // Nur auf "!ping" reagieren
-    if (message.content.toLowerCase() === '!ping') {
-      try {
-        const sent = await message.reply('🏓 Pingen...');
-        const latency = sent.createdTimestamp - message.createdTimestamp;
-        const apiPing = Math.round(client.ws.ping);
-
-        await sent.edit(`🏓 Pong! Bot-Latenz: **${latency}ms**, API-Latenz: **${apiPing}ms**`);
-
-        // ins Log schreiben
-        logger.info(`🏓 Ping-Command von ${message.author.tag} → Bot: ${latency}ms, API: ${apiPing}ms`);
-      } catch (err) {
-        logger.error('❌ Fehler im Ping-Command:', err);
-      }
+  client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'ping') return;
+    try {
+      await interaction.deferReply();
+      const replied = await interaction.fetchReply();
+      const latency = replied.createdTimestamp - interaction.createdTimestamp;
+      const apiPing = Math.round(client.ws.ping);
+      await interaction.editReply(`🏓 Pong! Bot-Latenz: **${latency}ms**, API-Latenz: **${apiPing}ms**`);
+      logger.info(`🏓 Ping-Command von ${interaction.user.tag} → Bot: ${latency}ms, API: ${apiPing}ms`);
+    } catch (err) {
+      logger.error('❌ Fehler im /ping-Command:', err);
     }
   });
 };
+
+module.exports.command = command;
