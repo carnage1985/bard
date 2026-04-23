@@ -56,10 +56,7 @@ module.exports = (client, logger = console) => {
         localLogger.info(`✅ Event gestartet: ${event.name} (${event.id})`);
         startedCount++;
 
-        if (!event.channelId) {
-          localLogger.warn(`ℹ️ Event ${event.name} hat keinen Channel – kein Chat-Post.`);
-          continue;
-        }
+        if (!event.channelId) continue;
 
         const vc = await client.channels.fetch(event.channelId).catch(() => null);
         if (!vc || (vc.type !== ChannelType.GuildVoice && vc.type !== ChannelType.GuildStageVoice)) {
@@ -71,6 +68,7 @@ module.exports = (client, logger = console) => {
         let roleIdForMention = null;
         const atMatch = desc.match(/@([^\s#@]{2,})/);
         if (atMatch && atMatch[1]) {
+          await guild.roles.fetch();
           const role = guild.roles.cache.find(r => r.name.toLowerCase() === atMatch[1].toLowerCase());
           if (role) {
             roleIdForMention = role.id;
@@ -80,7 +78,6 @@ module.exports = (client, logger = console) => {
         }
 
         const mentionText = roleIdForMention ? `<@&${roleIdForMention}> ` : '';
-
         await vc.send({
           content: `${mentionText}${event.name} ist jetzt gestartet 🎉`,
           allowedMentions: roleIdForMention
