@@ -1,5 +1,5 @@
 // src/jobs/geminiChat.js
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const Groq = require('groq-sdk');
 
 const MODEL = 'llama-3.3-70b-versatile';
@@ -95,7 +95,7 @@ module.exports = (client, logger = console) => {
 
     if (userText.toLowerCase() === 'reset') {
       clearHistory(key);
-      await interaction.reply({ content: '🎶 Ein neues Lied beginnt! Ich habe unsere bisherige Geschichte aus meinem Gedächtnis getilgt, werte Seele.', ephemeral: true });
+      await interaction.reply({ content: '🎶 Ein neues Lied beginnt! Ich habe unsere bisherige Geschichte aus meinem Gedächtnis getilgt, werte Seele.', flags: MessageFlags.Ephemeral });
       logger.info(`🗑️ Chat-Verlauf zurückgesetzt von ${interaction.user.tag}`);
       return;
     }

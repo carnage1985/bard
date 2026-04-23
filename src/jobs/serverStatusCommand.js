@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ChannelType, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, PermissionsBitField, MessageFlags } = require('discord.js');
 const Gamedig = require('gamedig');
 const {
   watchConfig,
@@ -47,7 +47,7 @@ module.exports = (client, logger = console) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'serverstatus') return;
 
     if (!hasPermission(interaction.member)) {
-      await interaction.reply({ content: '❌ Du brauchst **Manage Channels** oder **Manage Server**, um das zu nutzen.', ephemeral: true });
+      await interaction.reply({ content: '❌ Du brauchst **Manage Channels** oder **Manage Server**, um das zu nutzen.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -60,11 +60,11 @@ module.exports = (client, logger = console) => {
           ?? await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
 
         if (!targetChannel) {
-          await interaction.reply({ content: '❌ Channel nicht gefunden.', ephemeral: true });
+          await interaction.reply({ content: '❌ Channel nicht gefunden.', flags: MessageFlags.Ephemeral });
           return;
         }
         if (![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(targetChannel.type)) {
-          await interaction.reply({ content: '❌ Ziel muss ein normaler Text-Channel sein.', ephemeral: true });
+          await interaction.reply({ content: '❌ Ziel muss ein normaler Text-Channel sein.', flags: MessageFlags.Ephemeral });
           return;
         }
 
@@ -92,14 +92,14 @@ module.exports = (client, logger = console) => {
         setStatusConfig(interaction.guildId, targetChannel.id, intervalSeconds, messageId, logger);
         client.emit('serverStatusConfigChanged', interaction.guildId);
         logger.info(`📝 Server-Status gesetzt: guild=${interaction.guildId} channel=${targetChannel.id} intervalSeconds=${intervalSeconds}`);
-        await interaction.reply({ content: `✅ Server-Status wird alle **${intervalSeconds}s** in <#${targetChannel.id}> aktualisiert.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Server-Status wird alle **${intervalSeconds}s** in <#${targetChannel.id}> aktualisiert.`, flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === 'remove') {
         const existing = getStatusConfig(interaction.guildId, logger);
         if (!existing) {
-          await interaction.reply({ content: 'ℹ️ Kein Server-Status konfiguriert.', ephemeral: true });
+          await interaction.reply({ content: 'ℹ️ Kein Server-Status konfiguriert.', flags: MessageFlags.Ephemeral });
           return;
         }
         if (existing.messageId) {
@@ -114,18 +114,18 @@ module.exports = (client, logger = console) => {
         removeStatusConfig(interaction.guildId, logger);
         client.emit('serverStatusConfigChanged', interaction.guildId);
         logger.info(`🗑️ Server-Status entfernt: guild=${interaction.guildId}`);
-        await interaction.reply({ content: '✅ Server-Status entfernt.', ephemeral: true });
+        await interaction.reply({ content: '✅ Server-Status entfernt.', flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === 'refresh') {
         const existing = getStatusConfig(interaction.guildId, logger);
         if (!existing) {
-          await interaction.reply({ content: 'ℹ️ Kein Server-Status konfiguriert. Nutze `/serverstatus set`.', ephemeral: true });
+          await interaction.reply({ content: 'ℹ️ Kein Server-Status konfiguriert. Nutze `/serverstatus set`.', flags: MessageFlags.Ephemeral });
           return;
         }
         client.emit('serverStatusRefreshRequested', interaction.guildId);
-        await interaction.reply({ content: '🔄 Update angestoßen.', ephemeral: true });
+        await interaction.reply({ content: '🔄 Update angestoßen.', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -143,12 +143,12 @@ module.exports = (client, logger = console) => {
         for (const s of servers) {
           lines.push(`• ${s.icon ? s.icon + ' ' : ''}**${s.name ?? s._dir}** — \`${s.address ?? '?'}\``);
         }
-        await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+        await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === 'test') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const servers = loadHostingServers(logger);
         if (!servers.length) {
           await interaction.editReply(`ℹ️ Keine Server in \`${HOSTING_DIR}\` gefunden.`);
@@ -180,13 +180,13 @@ module.exports = (client, logger = console) => {
         } else {
           await interaction.editReply(lines[0]);
           for (const line of lines.slice(1)) {
-            await interaction.followUp({ content: line, ephemeral: true });
+            await interaction.followUp({ content: line, flags: MessageFlags.Ephemeral });
           }
         }
       }
     } catch (err) {
       logger.error('❌ Fehler im /serverstatus-Command:', err);
-      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', ephemeral: true };
+      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', flags: MessageFlags.Ephemeral };
       if (interaction.deferred || interaction.replied) await interaction.editReply(errMsg).catch(() => {});
       else await interaction.reply(errMsg).catch(() => {});
     }

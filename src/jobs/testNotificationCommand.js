@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField, MessageFlags } = require('discord.js');
 
 const OWNER_USER_ID = process.env.OWNER_USER_ID || '324155395709075457';
 
@@ -20,7 +20,7 @@ module.exports = (client, logger = console) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'testnotification') return;
 
     if (!hasPermission(interaction.member)) {
-      await interaction.reply({ content: '❌ Nur Admins mit dem Recht **Administrator** dürfen das nutzen.', ephemeral: true });
+      await interaction.reply({ content: '❌ Nur Admins mit dem Recht **Administrator** dürfen das nutzen.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -37,10 +37,10 @@ module.exports = (client, logger = console) => {
         ].join('\n'),
       });
       logger.info(`📨 Test-Notification gesendet von ${interaction.user.tag} (${interaction.user.id})`);
-      await interaction.reply({ content: '✅ Test-Benachrichtigung wurde per DM gesendet.', ephemeral: true });
+      await interaction.reply({ content: '✅ Test-Benachrichtigung wurde per DM gesendet.', flags: MessageFlags.Ephemeral });
     } catch (err) {
       logger.error('❌ Fehler im /testnotification-Command:', err);
-      await interaction.reply({ content: '❌ Die Test-Benachrichtigung konnte nicht gesendet werden.', ephemeral: true });
+      await interaction.reply({ content: '❌ Die Test-Benachrichtigung konnte nicht gesendet werden.', flags: MessageFlags.Ephemeral });
     }
   });
 };

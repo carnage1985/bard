@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, PermissionsBitField, MessageFlags } = require('discord.js');
 const {
   watchConfig,
   setCharacterName,
@@ -63,7 +63,7 @@ module.exports = (client, logger = console) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'dndchar') return;
 
     if (!hasPermission(interaction.member)) {
-      await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Nicknames** (oder Manage Server), um das zu nutzen.', ephemeral: true });
+      await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Nicknames** (oder Manage Server), um das zu nutzen.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -80,7 +80,7 @@ module.exports = (client, logger = console) => {
           await syncMemberCharacterName(member, channel.id, logger);
         }
         logger.info(`📝 D&D-Char gesetzt: guild=${interaction.guildId} channel=${channel.id} user=${user.id} → ${characterName}`);
-        await interaction.reply({ content: `✅ Gespeichert: <@${user.id}> wird in <#${channel.id}> zu **${characterName}**.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Gespeichert: <@${user.id}> wird in <#${channel.id}> zu **${characterName}**.`, flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -90,7 +90,7 @@ module.exports = (client, logger = console) => {
 
         const removed = removeCharacterName(interaction.guildId, channel.id, user.id, logger);
         if (!removed) {
-          await interaction.reply({ content: 'ℹ️ Kein Eintrag gefunden, es wurde nichts gelöscht.', ephemeral: true });
+          await interaction.reply({ content: 'ℹ️ Kein Eintrag gefunden, es wurde nichts gelöscht.', flags: MessageFlags.Ephemeral });
           return;
         }
         const member = await getGuildMember(interaction.guild, user.id);
@@ -98,18 +98,18 @@ module.exports = (client, logger = console) => {
           await syncMemberCharacterName(member, channel.id, logger);
         }
         logger.info(`🗑️ D&D-Char entfernt: guild=${interaction.guildId} channel=${channel.id} user=${user.id}`);
-        await interaction.reply({ content: `✅ Mapping entfernt für <@${user.id}> in <#${channel.id}>.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Mapping entfernt für <@${user.id}> in <#${channel.id}>.`, flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === 'list') {
         const channel = interaction.options.getChannel('channel');
         const listText = formatList(interaction.guildId, channel?.id ?? null, logger);
-        await interaction.reply({ content: listText, ephemeral: true });
+        await interaction.reply({ content: listText, flags: MessageFlags.Ephemeral });
       }
     } catch (err) {
       logger.error('❌ Fehler im /dndchar-Command:', err);
-      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', ephemeral: true };
+      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', flags: MessageFlags.Ephemeral };
       if (interaction.replied || interaction.deferred) await interaction.editReply(errMsg).catch(() => {});
       else await interaction.reply(errMsg).catch(() => {});
     }

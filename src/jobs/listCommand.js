@@ -1,5 +1,5 @@
 // src/jobs/listCommand.js
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
 const command = new SlashCommandBuilder()
   .setName('list')
@@ -43,7 +43,7 @@ module.exports = (client, logger = console) => {
     ];
 
     try {
-      await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+      await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
       logger.info(`📋 /list-Command ausgeführt von ${interaction.user.tag}`);
     } catch (err) {
       logger.error('❌ Fehler im /list-Command:', err);

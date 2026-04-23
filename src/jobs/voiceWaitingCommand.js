@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ChannelType, PermissionsBitField } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, PermissionsBitField, MessageFlags } = require('discord.js');
 const {
   watchConfig,
   setWaitingChannel,
@@ -47,7 +47,7 @@ module.exports = (client, logger = console) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'voicewait') return;
 
     if (!hasPermission(interaction.member)) {
-      await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Channels** oder **Manage Server**, um das zu nutzen.', ephemeral: true });
+      await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Channels** oder **Manage Server**, um das zu nutzen.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -58,14 +58,14 @@ module.exports = (client, logger = console) => {
         const waitMinutes = interaction.options.getInteger('minutes');
 
         if (![ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)) {
-          await interaction.reply({ content: '❌ Das angegebene Ziel ist kein Voice- oder Stage-Channel.', ephemeral: true });
+          await interaction.reply({ content: '❌ Das angegebene Ziel ist kein Voice- oder Stage-Channel.', flags: MessageFlags.Ephemeral });
           return;
         }
 
         setWaitingChannel(interaction.guildId, channel.id, waitMinutes, interaction.channelId, logger);
         client.emit('voiceWaitConfigChanged', channel);
         logger.info(`📝 Voice-Wait gesetzt: guild=${interaction.guildId} channel=${channel.id} waitMinutes=${waitMinutes} notifyChannel=${interaction.channelId}`);
-        await interaction.reply({ content: `✅ <#${channel.id}> wird jetzt überwacht. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, kommt ein \`@here\`-Ping hier in <#${interaction.channelId}>.`, ephemeral: true });
+        await interaction.reply({ content: `✅ <#${channel.id}> wird jetzt überwacht. Wenn dort jemand **${waitMinutes}** Minute(n) alleine ist, kommt ein \`@here\`-Ping hier in <#${interaction.channelId}>.`, flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -73,22 +73,22 @@ module.exports = (client, logger = console) => {
         const channel = interaction.options.getChannel('channel');
         const removed = removeWaitingChannel(interaction.guildId, channel.id, logger);
         if (!removed) {
-          await interaction.reply({ content: 'ℹ️ Für diesen Channel war kein Alleine-Ping hinterlegt.', ephemeral: true });
+          await interaction.reply({ content: 'ℹ️ Für diesen Channel war kein Alleine-Ping hinterlegt.', flags: MessageFlags.Ephemeral });
           return;
         }
         client.emit('voiceWaitConfigChanged', channel);
         logger.info(`🗑️ Voice-Wait entfernt: guild=${interaction.guildId} channel=${channel.id}`);
-        await interaction.reply({ content: `✅ Alleine-Ping für <#${channel.id}> entfernt.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Alleine-Ping für <#${channel.id}> entfernt.`, flags: MessageFlags.Ephemeral });
         return;
       }
 
       if (sub === 'list') {
         const listText = formatList(interaction.guildId, logger);
-        await interaction.reply({ content: listText, ephemeral: true });
+        await interaction.reply({ content: listText, flags: MessageFlags.Ephemeral });
       }
     } catch (err) {
       logger.error('❌ Fehler im /voicewait-Command:', err);
-      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', ephemeral: true };
+      const errMsg = { content: '❌ Da ist etwas schiefgelaufen. Schau ins Log für Details.', flags: MessageFlags.Ephemeral };
       if (interaction.replied || interaction.deferred) await interaction.editReply(errMsg).catch(() => {});
       else await interaction.reply(errMsg).catch(() => {});
     }
