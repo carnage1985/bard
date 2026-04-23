@@ -52,7 +52,7 @@ async function queryServer(server, logger) {
     };
   } catch (err) {
     const reason = err?.message || String(err);
-    logger?.warn?.(`⚠️ Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${normalizedType} ${queryHost}:${queryPort} → ${reason}`);
+    logger?.debug?.(`Server-Query fehlgeschlagen (${server.id ?? server._dir}) type=${normalizedType} ${queryHost}:${queryPort} → ${reason}`);
     return {
       online: docker.running,
       dockerRunning: docker.running,
