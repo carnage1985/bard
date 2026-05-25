@@ -5,7 +5,10 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      DISCORD_TOKEN: "TOKEN"
+      BOT_TOKEN: "${BOT_TOKEN}"
+      LOG_CHANNEL_ID: "${LOG_CHANNEL_ID:-}"
+      MCP_PORT: "${MCP_PORT:-3456}"
+      MCP_TOKEN: "${MCP_TOKEN}"
     volumes:
       - bard_data:/data
       - /hosting:/hosting:ro
