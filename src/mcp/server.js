@@ -280,8 +280,23 @@ function createMcpServer(client, logger = console) {
   // ── HTTP SERVER ──────────────────────────────────────────────────────────────
 
   const port = parseInt(process.env.MCP_PORT ?? '3456', 10);
+  const token = process.env.MCP_TOKEN ?? null;
+
+  if (!token) {
+    logger.warn('⚠️ MCP_TOKEN nicht gesetzt – MCP-Server ist ohne Authentifizierung erreichbar!');
+  }
 
   const httpServer = http.createServer((req, res) => {
+    // Auth-Check
+    if (token) {
+      const auth = req.headers['authorization'] ?? '';
+      if (auth !== `Bearer ${token}`) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+    }
+
     if (req.method !== 'POST' || req.url !== '/mcp') {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found – POST /mcp erwartet.' }));
@@ -307,8 +322,8 @@ function createMcpServer(client, logger = console) {
     });
   });
 
-  httpServer.listen(port, '127.0.0.1', () => {
-    logger.info(`🔌 MCP-Server läuft auf http://127.0.0.1:${port}/mcp`);
+  httpServer.listen(port, '0.0.0.0', () => {
+    logger.info(`🔌 MCP-Server läuft auf Port ${port} (${token ? 'mit Auth-Token' : '⚠️ KEIN TOKEN'})`);
   });
 
   return httpServer;
