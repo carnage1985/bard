@@ -6,6 +6,7 @@ services:
     network_mode: host
     environment:
       DISCORD_TOKEN: "TOKEN"
+      MCP_PORT: "3456"
     volumes:
       - bard_data:/data
       - /hosting:/hosting:ro
