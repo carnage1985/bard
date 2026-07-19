@@ -1,12 +1,14 @@
 // src/utils/logger.js
 const { Events } = require('discord.js');
 
+const NTFY_URL = process.env.NTFY_URL;
+const NTFY_TOKEN = process.env.NTFY_TOKEN;
+
 function createLogger(client, { channelId } = {}) {
   const queue = [];
   let channel = null;
   let ready = false;
 
-  // 2000 Limit beachten, wir bleiben etwas drunter
   const MAX = 1900, MAX_PER_TICK = 5, TICK_MS = 1500;
 
   client.once(Events.ClientReady, async () => {
@@ -37,8 +39,27 @@ function createLogger(client, { channelId } = {}) {
       ? (a.stack || a.message)
       : JSON.stringify(a, null, 2);
 
+  // Schickt Error-Logs zusätzlich an ntfy (Topic aus NTFY_URL), fire-and-forget.
+  const notifyNtfy = (args) => {
+    if (!NTFY_URL) return;
+    const text = args.map(toText).join(' ').slice(0, 3800);
+    const headers = {
+      'Title': 'Bard: Fehler',
+      'Priority': 'high',
+      'Tags': 'warning',
+    };
+    if (NTFY_TOKEN) headers['Authorization'] = `Bearer ${NTFY_TOKEN}`;
+    fetch(NTFY_URL, {
+      method: 'POST',
+      headers,
+      body: text,
+    }).catch(() => {});
+  };
+
   const enqueue = (level, ...args) => {
     // Option: { toDiscord: false } als letztes Argument unterdrückt die Weiterleitung
+    // (Discord-Channel UND ntfy) - z.B. um Melde-Schleifen bei bereits behandelten
+    // bzw. transienten Fehlern zu vermeiden.
     let toDiscord = true;
     if (args.length) {
       const meta = args[args.length - 1];
@@ -48,9 +69,10 @@ function createLogger(client, { channelId } = {}) {
       }
     }
 
-    // weiterhin in Konsole loggen
     // eslint-disable-next-line no-console
     console[level](...args);
+
+    if (level === 'error' && toDiscord) notifyNtfy(args);
 
     if (!toDiscord) return;
 
