@@ -20,7 +20,6 @@ const { registerCriticalErrorHandlers } = require('./utils/criticalErrorNotifier
 
 // Ready-Routine (lädt Jobs und loggt eine Übersicht)
 const onClientReady = require('./events/ready');
-const { createMcpServer } = require('./mcp/server');
 
 registerCriticalErrorHandlers(client, logger, {
   userId: '324155395709075457',
@@ -31,7 +30,6 @@ client.once(Events.ClientReady, async (c) => {
   // ✅ ab jetzt logger statt console.* verwenden
   logger.info(`🟢 [ClientReady] Bard geladen & eingeloggt als ${c.user.tag} (${c.user.id}) @ ${ts}`);
   await onClientReady(c, logger); // logger an ready.js weitergeben
-  createMcpServer(client, logger);
 });
 
 client.login(process.env.BOT_TOKEN);
