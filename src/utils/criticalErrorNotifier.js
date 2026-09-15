@@ -119,6 +119,10 @@ function registerCriticalErrorHandlers(client, logger = console, options = {}) {
   // Transiente Gateway-Fehler (z.B. 503 beim Handshake) nur als Warnung loggen;
   // DM an den Owner erst, wenn ein Shard sich wiederholt nicht fangen kann.
   const shardErrorTimestamps = new Map();
+  // Zeitpunkt des ersten Fehlers im eskalierten Fenster, solange der Shard noch
+  // nicht wieder erfolgreich verbunden ist. Erlaubt eine Recovery-Meldung mit
+  // tatsächlicher Ausfalldauer, statt den Owner im Ungewissen zu lassen.
+  const escalatedSince = new Map();
 
   client.on(Events.ShardError, (error, shardId) => {
     if (!isTransientConnectionError(error)) {
@@ -133,6 +137,7 @@ function registerCriticalErrorHandlers(client, logger = console, options = {}) {
     shardErrorTimestamps.set(shardId, recent);
 
     if (recent.length >= SHARD_ERROR_THRESHOLD) {
+      if (!escalatedSince.has(shardId)) escalatedSince.set(shardId, recent[0]);
       shardErrorTimestamps.set(shardId, []);
       void notifier.report(
         `discordShardError#${shardId} (${recent.length}x in ${SHARD_ERROR_WINDOW_MS / 60000} Min.)`,
@@ -148,12 +153,22 @@ function registerCriticalErrorHandlers(client, logger = console, options = {}) {
     );
   });
 
-  const resetShardErrors = (shardId) => {
+  const resetShardErrors = (shardId, eventName) => {
     if (shardErrorTimestamps.has(shardId)) shardErrorTimestamps.delete(shardId);
+
+    const since = escalatedSince.get(shardId);
+    if (since === undefined) return;
+    escalatedSince.delete(shardId);
+
+    const downtimeMs = Date.now() - since;
+    const downtimeMin = Math.max(1, Math.round(downtimeMs / 60000));
+    logger.info(
+      `✅ Shard ${shardId} wieder verbunden (${eventName}) nach ca. ${downtimeMin} Min. Verbindungsproblemen.`,
+    );
   };
 
-  client.on(Events.ShardReady, resetShardErrors);
-  client.on(Events.ShardResume, resetShardErrors);
+  client.on(Events.ShardReady, (shardId) => resetShardErrors(shardId, 'ShardReady'));
+  client.on(Events.ShardResume, (shardId) => resetShardErrors(shardId, 'ShardResume'));
 
   process.on('unhandledRejection', (reason) => {
     void notifier.report('unhandledRejection', reason);
