@@ -15,9 +15,6 @@ const TRANSIENT_ERROR_PATTERNS = [
   /socket hang up/i,
 ];
 
-const SHARD_ERROR_WINDOW_MS = 15 * 60 * 1000;
-const SHARD_ERROR_THRESHOLD = 3;
-
 function isTransientConnectionError(error) {
   const text = error instanceof Error ? `${error.message} ${error.code || ''}` : String(error);
   return TRANSIENT_ERROR_PATTERNS.some((pattern) => pattern.test(text));
@@ -88,13 +85,14 @@ function createCriticalErrorNotifier(client, logger = console, { userId } = {}) 
     }
   });
 
-  const notify = async (source, error) => {
-    const message = buildMessage(source, error);
+  const notifyPlain = async (message) => {
     pendingMessages.push(message);
 
     if (!ready || !owner) return;
     await flushPending();
   };
+
+  const notify = (source, error) => notifyPlain(buildMessage(source, error));
 
   const report = async (source, error) => {
     logger.error(`🚨 Schwerer Fehler (${source}):`, error);
@@ -106,7 +104,18 @@ function createCriticalErrorNotifier(client, logger = console, { userId } = {}) 
     }
   };
 
-  return { report };
+  const reportRecovery = async (source, message) => {
+    logger.info(`✅ ${message}`);
+
+    const text = ['✅ Bot-Problem behoben.', `Zeit: ${new Date().toISOString()}`, `Quelle: ${source}`, message].join('\n');
+    try {
+      await notifyPlain(text);
+    } catch (notifyError) {
+      logger.error('❌ Fehler beim Zustellen einer Recovery-DM:', notifyError, { toDiscord: false });
+    }
+  };
+
+  return { report, reportRecovery };
 }
 
 function registerCriticalErrorHandlers(client, logger = console, options = {}) {
@@ -116,13 +125,10 @@ function registerCriticalErrorHandlers(client, logger = console, options = {}) {
     void notifier.report('discordClientError', error);
   });
 
-  // Transiente Gateway-Fehler (z.B. 503 beim Handshake) nur als Warnung loggen;
-  // DM an den Owner erst, wenn ein Shard sich wiederholt nicht fangen kann.
-  const shardErrorTimestamps = new Map();
-  // Zeitpunkt des ersten Fehlers im eskalierten Fenster, solange der Shard noch
-  // nicht wieder erfolgreich verbunden ist. Erlaubt eine Recovery-Meldung mit
-  // tatsächlicher Ausfalldauer, statt den Owner im Ungewissen zu lassen.
-  const escalatedSince = new Map();
+  // Transiente Gateway-Fehler (z.B. 503 beim Handshake): DM beim ersten Fehler
+  // einer Verbindungsstörung, danach nur noch stumm loggen (discord.js
+  // reconnectet selbst), bis der Shard wieder verbunden ist - dann Recovery-DM.
+  const shardDownSince = new Map();
 
   client.on(Events.ShardError, (error, shardId) => {
     if (!isTransientConnectionError(error)) {
@@ -130,40 +136,32 @@ function registerCriticalErrorHandlers(client, logger = console, options = {}) {
       return;
     }
 
-    const now = Date.now();
-    const recent = (shardErrorTimestamps.get(shardId) || [])
-      .filter((ts) => now - ts < SHARD_ERROR_WINDOW_MS);
-    recent.push(now);
-    shardErrorTimestamps.set(shardId, recent);
-
-    if (recent.length >= SHARD_ERROR_THRESHOLD) {
-      if (!escalatedSince.has(shardId)) escalatedSince.set(shardId, recent[0]);
-      shardErrorTimestamps.set(shardId, []);
-      void notifier.report(
-        `discordShardError#${shardId} (${recent.length}x in ${SHARD_ERROR_WINDOW_MS / 60000} Min.)`,
+    if (shardDownSince.has(shardId)) {
+      logger.warn(
+        `⚠️ Weiterer Gateway-Fehler auf Shard ${shardId} (weiterhin getrennt), Reconnect läuft automatisch:`,
         error,
+        { toDiscord: false },
       );
       return;
     }
 
-    logger.warn(
-      `⚠️ Vorübergehender Gateway-Fehler auf Shard ${shardId} (${recent.length}/${SHARD_ERROR_THRESHOLD}), Reconnect läuft automatisch:`,
-      error,
-      { toDiscord: false },
-    );
+    shardDownSince.set(shardId, Date.now());
+    void notifier.report(`discordShardError#${shardId}`, error);
   });
 
   const resetShardErrors = (shardId, eventName) => {
-    if (shardErrorTimestamps.has(shardId)) shardErrorTimestamps.delete(shardId);
-
-    const since = escalatedSince.get(shardId);
+    const since = shardDownSince.get(shardId);
     if (since === undefined) return;
-    escalatedSince.delete(shardId);
+    shardDownSince.delete(shardId);
 
     const downtimeMs = Date.now() - since;
-    const downtimeMin = Math.max(1, Math.round(downtimeMs / 60000));
-    logger.info(
-      `✅ Shard ${shardId} wieder verbunden (${eventName}) nach ca. ${downtimeMin} Min. Verbindungsproblemen.`,
+    const downtimeLabel = downtimeMs < 60000
+      ? `${Math.max(1, Math.round(downtimeMs / 1000))}s`
+      : `${Math.round(downtimeMs / 60000)} Min.`;
+
+    void notifier.reportRecovery(
+      `discordShardRecovered#${shardId}`,
+      `Shard ${shardId} wieder verbunden (${eventName}) nach ca. ${downtimeLabel} Verbindungsproblemen.`,
     );
   };
 
