@@ -8,8 +8,8 @@ const fs = require('fs');
 const path = require('path');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const ROUTE = /\/([a-f0-9]{12})(\/(state|events|board\.js|board\.css)?)?$/;
-const MIME = { 'board.js': 'text/javascript; charset=utf-8', 'board.css': 'text/css; charset=utf-8' };
+const ROUTE = /\/([a-f0-9]{12})(\/(state|events|(?:board|sh|ww)\.js|board\.css)?)?$/;
+const MIME = { js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' };
 
 const views = new Map(); // code -> öffentliche Sicht
 const clients = new Map(); // code -> Set<res>
@@ -28,8 +28,12 @@ function remove(code) {
   clients.delete(code);
 }
 
+let server = null;
+
+// Idempotent: mehrere Spiel-Module dürfen start() aufrufen, es gibt nur einen Server.
 function start({ port, logger = console }) {
-  const server = http.createServer((req, res) => {
+  if (server) return server;
+  server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     const m = ROUTE.exec(url.pathname);
     if (!m) { res.writeHead(404).end('Not found'); return; }
@@ -40,10 +44,10 @@ function start({ port, logger = console }) {
       res.writeHead(301, { Location: `${code}/` }).end();
       return;
     }
-    if (what === 'board.js' || what === 'board.css') {
+    if (/\.(js|css)$/.test(what || '')) {
       fs.readFile(path.join(PUBLIC_DIR, what), (err, buf) => {
         if (err) { res.writeHead(404).end(); return; }
-        res.writeHead(200, { ...baseHeaders, 'Content-Type': MIME[what] }).end(buf);
+        res.writeHead(200, { ...baseHeaders, 'Content-Type': MIME[what.split('.').pop()] }).end(buf);
       });
       return;
     }
@@ -71,7 +75,7 @@ function start({ port, logger = console }) {
       });
     }
   });
-  server.listen(port, () => logger.info(`🌐 Secret-Hitler-Board läuft auf Port ${port}.`, { toDiscord: false }));
+  server.listen(port, () => logger.info(`🌐 Spielplan-Server läuft auf Port ${port}.`, { toDiscord: false }));
   server.on('error', (err) => logger.error('❌ Board-Server Fehler:', err));
   return server;
 }

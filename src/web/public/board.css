@@ -30,3 +30,21 @@ section,.track{background:var(--card);border-radius:10px;padding:12px}
 footer{max-width:960px;margin:0 auto;padding:16px;font-size:.75rem;color:var(--mut)}
 a{color:inherit}
 @media(min-width:720px){.tracks{grid-template-columns:1fr 1fr}}
+
+/* ---- Werwolf ---- */
+.mut{color:var(--mut);font-weight:400}
+body.ww{transition:background .6s,color .6s}
+body.ww.night{--bg:#0f1322;--card:#1a2038;--fg:#dfe6ff;--mut:#8b95b8}
+body.ww.day{--bg:#f6efd9;--card:#fffaf0;--fg:#2b2418;--mut:#7a6f58}
+body.ww.over{--bg:#1b1a19}
+.phase{font-size:1.15rem;font-weight:700}
+.clock{font-variant-numeric:tabular-nums;font-size:1.3rem}
+.comp{display:grid;gap:8px}
+.cteam{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{padding:2px 10px;border-radius:99px;background:var(--bg);font-size:.85rem}
+.cteam.wolves .chip{outline:1px solid #c8442f}.cteam.village .chip{outline:1px solid #3b82c4}.cteam.neutral .chip{outline:1px solid #9b59b6}
+.players.ww li{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.players.ww li.wolves{border-color:#c8442f}.players.ww li.village{border-color:#3b82c4}.players.ww li.neutral{border-color:#9b59b6}
+.players.ww .pname{font-weight:600}
+.players.ww li.dead .pname{text-decoration:line-through}
+.banner.village{background:#3b82c4;color:#fff}.banner.wolves{background:#c8442f;color:#fff}.banner.neutral{background:#9b59b6;color:#fff}

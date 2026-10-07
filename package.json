@@ -5,7 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/engine.test.js"
+    "test": "node --test test/engine.test.js test/werewolf.test.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",

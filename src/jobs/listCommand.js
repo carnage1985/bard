@@ -41,6 +41,9 @@ module.exports = (client, logger = console) => {
       '`/sh start` · `/sh status` · `/sh abbrechen` · `/sh regeln`',
       '→ Secret Hitler im Sprachkanal spielen (Rollen per DM, Spielplan als Webseite).',
       '',
+      '`/ww start` · `/ww status` · `/ww abbrechen` · `/ww regeln`',
+      '→ Werwolf im Sprachkanal (Rollen per DM, nachts stumm, Wolfs-Thread, Optionen in der Lobby).',
+      '',
       '`/chat message:` oder **@Bot** <Nachricht>',
       '→ Chattet mit dem Bot via AI. Schreibe `reset` als Nachricht um den Verlauf zu löschen.',
     ];

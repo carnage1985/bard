@@ -2,16 +2,16 @@
 // Geheime Infos laufen per DM (Fallback: "Meine Aktion"-Button mit Ephemeral-Antwort),
 // öffentliche Abstimmungen per Buttons im Kanal, der Spielplan als Live-Webseite.
 const crypto = require('crypto');
-const {
-  SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
-  EmbedBuilder, MessageFlags, PermissionsBitField,
-} = require('discord.js');
+const { SlashCommandBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
 const E = require('../games/secretHitler/engine');
-const store = require('../games/secretHitler/store');
 const board = require('../web/boardServer');
+const sessions = require('../games/core/sessions');
+const { EPHEMERAL, row, btn, playerSelect, createMessenger } = require('../games/core/messenger');
+const { collectLobby, lobbyPayload: buildLobbyPayload, applyLobbyAction } = require('../games/core/lobby');
 
 const { PHASE } = E;
-const EPHEMERAL = MessageFlags.Ephemeral;
+const TYPE = 'sh';
+const LOBBY_LIMITS = { min: E.MIN_PLAYERS, max: E.MAX_PLAYERS };
 
 const command = new SlashCommandBuilder()
   .setName('sh')
@@ -34,19 +34,15 @@ const cardName = (c) => (c === 'L' ? '🕊️ Liberal' : '🐍 Faschistisch');
 const mention = (id) => `<@${id}>`;
 
 module.exports = (client, logger = console) => {
-  const quiet = (msg, ...a) => logger.info(msg, ...a, { toDiscord: false });
-  const games = new Map(); // guildId -> game
+  sessions.init(logger);
+  const { quiet, channelOf, say, dm, deliverPrivate: deliver, setMute } = createMessenger(client, logger);
   const webBase = (process.env.WEB_BASE_URL || '').replace(/\/+$/, '');
   const webPort = Number(process.env.WEB_PORT) || 3000;
   let webStarted = false;
 
   // ---------- Persistenz / Web ----------
 
-  function persist() {
-    const out = {};
-    for (const [gid, g] of games) out[gid] = g;
-    store.save(out, logger);
-  }
+  const persist = () => sessions.persist();
 
   function view(game) {
     if (game.state) return E.publicView(game.state);
@@ -79,27 +75,6 @@ module.exports = (client, logger = console) => {
   const nameOf = (game, id) => game.state?.players.find((p) => p.id === id)?.name
     || game.lobby.find((p) => p.id === id)?.name || 'Unbekannt';
 
-  async function channelOf(game) {
-    return client.channels.fetch(game.channelId).catch(() => null);
-  }
-
-  async function say(game, payload) {
-    const ch = await channelOf(game);
-    if (!ch) return null;
-    try { return await ch.send(typeof payload === 'string' ? { content: payload } : payload); } catch (err) {
-      logger.error('❌ Secret Hitler: Senden fehlgeschlagen:', err);
-      return null;
-    }
-  }
-
-  const row = (...components) => new ActionRowBuilder().addComponents(...components);
-  const btn = (id, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
-
-  function playerSelect(game, customId, placeholder, players) {
-    return new StringSelectMenuBuilder().setCustomId(customId).setPlaceholder(placeholder)
-      .addOptions(players.map((p) => ({ label: p.name.slice(0, 100), value: p.id })));
-  }
-
   // Privater Prompt (Text + Komponenten) für das, was `userId` gerade tun muss.
   function promptFor(game, userId) {
     const s = game.state;
@@ -109,7 +84,7 @@ module.exports = (client, logger = console) => {
     if (s.phase === PHASE.NOMINATE && userId === pres.id) {
       return {
         content: '🏛️ **Du bist Präsident.** Wen nominierst du als Kanzler?',
-        components: [row(playerSelect(game, `sh:nom:${g}`, 'Kanzlerkandidat wählen', E.legalChancellors(s)))],
+        components: [row(playerSelect(`sh:nom:${g}`, 'Kanzlerkandidat wählen', E.legalChancellors(s)))],
       };
     }
     if (s.phase === PHASE.LEGISLATE_PRESIDENT && userId === pres.id) {
@@ -142,7 +117,7 @@ module.exports = (client, logger = console) => {
       }
       return {
         content: `⚡ **Macht: ${POWER_TEXT[s.power]}** – wähle einen Spieler.`,
-        components: [row(playerSelect(game, g2, 'Spieler wählen', E.powerTargets(s)))],
+        components: [row(playerSelect(g2, 'Spieler wählen', E.powerTargets(s)))],
       };
     }
     return null;
@@ -161,17 +136,6 @@ module.exports = (client, logger = console) => {
     }
   }
 
-  async function dm(userId, payload) {
-    try {
-      const user = await client.users.fetch(userId);
-      await user.send(payload);
-      return true;
-    } catch (err) {
-      quiet(`⚠️ Secret Hitler: DM an ${userId} fehlgeschlagen (${err.code || err.message}).`);
-      return false;
-    }
-  }
-
   async function sendPrompt(game, userId) {
     const prompt = promptFor(game, userId);
     if (!prompt) return;
@@ -187,28 +151,13 @@ module.exports = (client, logger = console) => {
 
   // ---------- Spielstart ----------
 
-  function lobbyPayload(game) {
-    const link = boardLink(game);
-    const embed = new EmbedBuilder()
-      .setTitle('🎩 Secret Hitler – Lobby')
-      .setDescription([
-        `Spieler (${game.lobby.length}/${E.MAX_PLAYERS}, min. ${E.MIN_PLAYERS}):`,
-        game.lobby.map((p) => `• ${mention(p.id)}`).join('\n') || '–',
-        '',
-        `Host: ${mention(game.hostId)}`,
-        link ? `📋 Spielplan: ${link}` : '',
-        'Gesprochen wird im Sprachkanal, Aktionen laufen über Buttons. Rollen kommen per DM.',
-      ].filter((l) => l !== '').join('\n'));
-    return {
-      embeds: [embed],
-      components: [row(
-        btn('sh:join', 'Beitreten', ButtonStyle.Success),
-        btn('sh:leave', 'Verlassen'),
-        btn('sh:begin', 'Spiel starten', ButtonStyle.Primary),
-      )],
-      allowedMentions: { parse: [] },
-    };
-  }
+  const lobbyPayload = (game) => buildLobbyPayload(game, {
+    prefix: TYPE,
+    title: '🎩 Secret Hitler – Lobby',
+    ...LOBBY_LIMITS,
+    link: boardLink(game),
+    hint: 'Gesprochen wird im Sprachkanal, Aktionen laufen über Buttons. Rollen kommen per DM.',
+  });
 
   async function updateLobby(game) {
     const ch = await channelOf(game);
@@ -312,15 +261,7 @@ module.exports = (client, logger = console) => {
     }
   }
 
-  async function muteDead(game, userId, mute = true) {
-    try {
-      const ch = await channelOf(game);
-      const member = await ch?.guild.members.fetch(userId);
-      if (member?.voice.channelId) await member.voice.setMute(mute, 'Secret Hitler');
-    } catch (err) {
-      quiet(`ℹ️ Secret Hitler: Mute für ${userId} nicht möglich (${err.code || err.message}).`);
-    }
-  }
+  const muteDead = setMute;
 
   // Events verarbeiten, dann private Prompts für den neuen Zustand verschicken.
   // `actor` = Interaction-User, an den private Ergebnisse direkt (ephemeral) gehen.
@@ -341,7 +282,7 @@ module.exports = (client, logger = console) => {
       for (const p of s.players) if (!p.alive) await muteDead(game, p.id, false);
       sync(game);
       setTimeout(() => { // Board noch kurz sichtbar lassen
-        games.delete(game.guildId);
+        sessions.remove(game.guildId);
         board.remove(game.code);
         persist();
       }, 60 * 60 * 1000).unref();
@@ -361,13 +302,7 @@ module.exports = (client, logger = console) => {
     }
   }
 
-  async function deliverPrivate(game, userId, text, interaction) {
-    if (interaction && interaction.user.id === userId) {
-      await interaction.followUp({ content: text, flags: EPHEMERAL }).catch(() => dm(userId, { content: text }));
-    } else {
-      await dm(userId, { content: text });
-    }
-  }
+  const deliverPrivate = (game, userId, text, interaction) => deliver(userId, text, interaction);
 
   async function updateVoteMessage(game) {
     const s = game.state;
@@ -399,7 +334,10 @@ module.exports = (client, logger = console) => {
     const sub = interaction.options.getSubcommand();
     const gid = interaction.guildId;
     if (!gid) return interaction.reply({ content: '❌ Nur auf einem Server nutzbar.', flags: EPHEMERAL });
-    const game = games.get(gid);
+    const game = sessions.get(gid);
+    if (game && game.type !== TYPE && sub !== 'regeln') {
+      return interaction.reply({ content: '❌ Auf diesem Server läuft bereits ein anderes Spiel.', flags: EPHEMERAL });
+    }
 
     if (sub === 'regeln') {
       return interaction.reply({
@@ -421,7 +359,7 @@ module.exports = (client, logger = console) => {
         || interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
       if (!allowed) return interaction.reply({ content: '❌ Nur der Host oder Manage Server.', flags: EPHEMERAL });
       for (const p of game.state?.players || []) if (!p.alive) await muteDead(game, p.id, false);
-      games.delete(gid);
+      sessions.remove(gid);
       board.remove(game.code);
       persist();
       return interaction.reply('🛑 Secret Hitler wurde abgebrochen.');
@@ -429,19 +367,13 @@ module.exports = (client, logger = console) => {
     // start
     if (game) return interaction.reply({ content: '❌ Auf diesem Server läuft bereits ein Spiel (`/sh status`).', flags: EPHEMERAL });
     await interaction.deferReply({ flags: EPHEMERAL });
-    const voice = interaction.member?.voice?.channel;
-    const lobby = [{ id: interaction.user.id, name: interaction.member.displayName }];
-    if (voice) {
-      for (const m of voice.members.values()) {
-        if (!m.user.bot && m.id !== interaction.user.id && lobby.length < E.MAX_PLAYERS) lobby.push({ id: m.id, name: m.displayName });
-      }
-    }
+    const { lobby, fromVoice: voice } = collectLobby(interaction, E.MAX_PLAYERS);
     const g = {
-      guildId: gid, channelId: interaction.channelId, hostId: interaction.user.id,
+      type: TYPE, guildId: gid, channelId: interaction.channelId, hostId: interaction.user.id,
       code: crypto.randomBytes(6).toString('hex'), lobby, state: null,
       lobbyMsgId: null, voteMsgId: null, promptKey: null,
     };
-    games.set(gid, g);
+    sessions.set(gid, g);
     ensureWeb();
     const msg = await say(g, lobbyPayload(g));
     g.lobbyMsgId = msg?.id || null;
@@ -454,25 +386,21 @@ module.exports = (client, logger = console) => {
   async function handleComponent(interaction) {
     const [, action, gidFromId, arg] = interaction.customId.split(':');
     const gid = interaction.guildId || gidFromId;
-    const game = games.get(gid);
+    const game = sessions.get(gid);
     const reply = (content) => interaction.reply({ content, flags: EPHEMERAL }).catch(() => {});
-    if (!game) return reply('❌ Dieses Spiel läuft nicht mehr.');
+    if (!game || game.type !== TYPE) return reply('❌ Dieses Spiel läuft nicht mehr.');
     const uid = interaction.user.id;
 
     // --- Lobby ---
     if (['join', 'leave', 'begin'].includes(action)) {
       if (game.state) return reply('❌ Das Spiel läuft bereits.');
-      if (action === 'join') {
-        if (game.lobby.some((p) => p.id === uid)) return reply('Du bist schon dabei.');
-        if (game.lobby.length >= E.MAX_PLAYERS) return reply('❌ Die Lobby ist voll.');
-        game.lobby.push({ id: uid, name: interaction.member?.displayName || interaction.user.username });
-      } else if (action === 'leave') {
-        game.lobby = game.lobby.filter((p) => p.id !== uid);
-        if (!game.lobby.length) { games.delete(gid); board.remove(game.code); persist(); return interaction.update({ content: 'Lobby geschlossen.', embeds: [], components: [] }); }
-        if (uid === game.hostId) game.hostId = game.lobby[0].id;
-      } else {
-        if (uid !== game.hostId) return reply('❌ Nur der Host kann starten.');
-        if (game.lobby.length < E.MIN_PLAYERS) return reply(`❌ Mindestens ${E.MIN_PLAYERS} Spieler nötig.`);
+      const res = applyLobbyAction(game, action, interaction, LOBBY_LIMITS);
+      if (res.error) return reply(res.error);
+      if (res.closed) {
+        sessions.remove(gid); board.remove(game.code); persist();
+        return interaction.update({ content: 'Lobby geschlossen.', embeds: [], components: [] });
+      }
+      if (res.begin) {
         await interaction.update({ content: '🎩 Spiel gestartet.', embeds: [], components: [] }).catch(() => {});
         return beginGame(game, interaction);
       }
@@ -550,13 +478,13 @@ module.exports = (client, logger = console) => {
   });
 
   // Laufende Spiele nach Neustart wiederherstellen.
-  const saved = store.load(logger);
-  for (const [gid, g] of Object.entries(saved)) {
-    if (g.state?.phase === PHASE.GAME_OVER) continue;
-    games.set(gid, g);
+  let restored = 0;
+  for (const g of sessions.restore(TYPE)) {
+    if (g.state?.phase === PHASE.GAME_OVER) { sessions.remove(g.guildId); continue; }
+    restored += 1;
     if (webBase) { ensureWeb(); board.publish(g.code, view(g)); }
   }
-  if (games.size) quiet(`🎩 Secret Hitler: ${games.size} Spiel(e) wiederhergestellt.`);
+  if (restored) quiet(`🎩 Secret Hitler: ${restored} Spiel(e) wiederhergestellt.`);
 };
 
 module.exports.command = command;
