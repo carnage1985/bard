@@ -69,6 +69,7 @@ function createGame({ code, hostId, players, rng = Math.random, options = {} }) 
     players: players.map((p, i) => ({
       id: p.id, name: p.name, role: assigned[i], alive: true, deathCause: null, triggered: false,
     })),
+    composition: assigned.reduce((c, id) => ({ ...c, [id]: (c[id] || 0) + 1 }), {}), // öffentlich (steht auch in der Lobby)
     phase: PHASE.NIGHT,
     night: 0,
     day: 0,
@@ -396,6 +397,17 @@ function roleInfo(s, id) {
   };
 }
 
+// Rollen im Spiel gruppiert nach Seite (Anzahl pro Rolle, keine Zuordnung zu Spielern).
+function compositionView(counts) {
+  return [TEAMS.VILLAGE, TEAMS.WOLVES, TEAMS.NEUTRAL].map((team) => ({
+    team,
+    name: TEAM_INFO[team].name,
+    emoji: TEAM_INFO[team].emoji,
+    roles: allRoles().filter((r) => r.team === team && counts[r.id])
+      .map((r) => ({ id: r.id, name: r.name, emoji: r.emoji, count: counts[r.id] })),
+  })).filter((g) => g.roles.length);
+}
+
 // Öffentliche Sicht – keine Rollen lebender Spieler, keine Nachtaktionen.
 function publicView(s) {
   const over = s.phase === PHASE.GAME_OVER;
@@ -408,6 +420,8 @@ function publicView(s) {
     isNight: s.phase === PHASE.NIGHT,
     deadline: s.deadline,
     aliveCount: alive(s).length,
+    roles: Object.fromEntries(allRoles().map((r) => [r.id, { name: r.name, emoji: r.emoji, team: r.team }])),
+    composition: compositionView(s.composition),
     players: s.players.map((p) => ({
       id: p.id,
       name: p.name,

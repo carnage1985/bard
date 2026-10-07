@@ -3,28 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Secret Hitler – Spielplan</title>
+<title>Spielplan</title>
 <link rel="stylesheet" href="board.css">
 </head>
 <body>
-<header><h1>Secret Hitler</h1><div id="status" class="status">verbinde…</div></header>
-<main>
-  <section id="banner" class="banner" hidden></section>
-  <section class="tracks">
-    <div class="track lib"><h2>Liberale</h2><div id="libTrack" class="slots"></div></div>
-    <div class="track fas"><h2>Faschisten</h2><div id="fasTrack" class="slots"></div></div>
-  </section>
-  <section class="meta">
-    <div>Wahl-Tracker <span id="tracker" class="dots"></span></div>
-    <div>Nachziehstapel <b id="deck">–</b> · Ablage <b id="discard">–</b></div>
-    <div id="phase"></div>
-  </section>
-  <section><h2>Spieler</h2><ul id="players" class="players"></ul></section>
-  <section><h2>Verlauf</h2><ol id="log" class="log"></ol></section>
-</main>
-<footer>Secret Hitler von Mike Boxleiter, Tommy Maranges &amp; Mac Schubert –
-<a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> ·
-<a href="https://secrethitler.com">secrethitler.com</a>. Diese Umsetzung ist ein nicht-kommerzieller Discord-Bot-Modus.</footer>
+<header><h1 id="title">Spielplan</h1><div id="status" class="status">verbinde…</div></header>
+<main id="app"></main>
+<footer id="credit"></footer>
 <script src="board.js"></script>
+<script src="sh.js"></script>
+<script src="ww.js"></script>
 </body>
 </html>

@@ -263,3 +263,13 @@ test('describeSetup: Vorschau, Warnungen und Fehler', () => {
   assert.ok(describeSetup(4, {}).errors.length > 0);
   assert.ok(selectableRoles().every((r) => !r.fill && r.team !== TEAMS.WOLVES));
 });
+
+test('publicView für das Web-Board: Typ, Rollen-Metadaten, Zusammenstellung ohne Zuordnung', () => {
+  const s = mk(8);
+  const v = W.publicView(s);
+  assert.strictEqual(v.type, 'werewolf');
+  assert.ok(v.roles.seer && v.roles.seer.team === TEAMS.VILLAGE);
+  const total = v.composition.flatMap((g) => g.roles).reduce((n, r) => n + r.count, 0);
+  assert.strictEqual(total, 8);
+  assert.ok(v.players.every((p) => p.role === null));
+});

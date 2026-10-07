@@ -10,6 +10,7 @@ const {
 const W = require('../games/werewolf/engine');
 const { getRole } = require('../games/werewolf/roles');
 const { describeSetup, selectableRoles } = require('../games/werewolf/setup');
+const board = require('../web/boardServer');
 const sessions = require('../games/core/sessions');
 const { EPHEMERAL, row, btn, playerSelect, createMessenger } = require('../games/core/messenger');
 const { collectLobby, lobbyPayload: buildLobbyPayload, applyLobbyAction } = require('../games/core/lobby');
@@ -44,6 +45,31 @@ module.exports = (client, logger = console) => {
     quiet, channelOf, say, dm, deliverPrivate, setMute,
   } = createMessenger(client, logger);
 
+  const webBase = (process.env.WEB_BASE_URL || '').replace(/\/+$/, '');
+  const webPort = Number(process.env.WEB_PORT) || 3000;
+  const boardLink = (game) => (webBase ? `${webBase}/${game.code}/` : null);
+
+  // Öffentliche Sicht fürs Web-Board (Lobby: nur Namen, kein Spielzustand).
+  function view(game) {
+    if (game.state) return W.publicView(game.state);
+    const setup = setupFor(game);
+    return {
+      code: game.code, type: 'werewolf', phase: 'LOBBY', night: 0, day: 0, isNight: false, deadline: null,
+      aliveCount: game.lobby.length, roles: {}, composition: setup.groups,
+      players: game.lobby.map((p) => ({ id: p.id, name: p.name, alive: true, voted: null, cause: null, role: null })),
+      winner: null, winReason: null, log: [],
+    };
+  }
+
+  function ensureWeb() {
+    if (webBase) board.start({ port: webPort, logger });
+  }
+
+  function sync(game) {
+    if (webBase) board.publish(game.code, view(game));
+    sessions.persist();
+  }
+
   const persist = () => sessions.persist();
   const timers = (game) => PROFILES[game.options.profile] || PROFILES.normal;
   const nameOf = (game, id) => (game.state || game).players?.find((p) => p.id === id)?.name
@@ -71,7 +97,9 @@ module.exports = (client, logger = console) => {
 
   function lobbyPayload(game) {
     const setup = setupFor(game);
+    const link = boardLink(game);
     const hint = [
+      link ? `📋 Spielplan: ${link}` : '',
       `**Rollen (bei ${Math.max(game.lobby.length, LIMITS.min)} Spielern):**`,
       setup.text,
       ...setup.warnings.map((w) => `⚠️ ${w}`),
@@ -79,7 +107,7 @@ module.exports = (client, logger = console) => {
       `⏱️ ${timers(game).label}`,
       game.options.revealRoles ? '🪦 Rollen werden beim Tod aufgedeckt.' : '🪦 Rollen bleiben nach dem Tod geheim.',
       'Gesprochen wird im Sprachkanal (nachts stumm), Aktionen per Buttons/DM, Wölfe sprechen sich im privaten Thread ab.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     return buildLobbyPayload(game, {
       prefix: TYPE,
       title: '🐺 Werwolf – Lobby',
@@ -93,7 +121,7 @@ module.exports = (client, logger = console) => {
     const ch = await channelOf(game);
     const msg = game.lobbyMsgId && await ch?.messages.fetch(game.lobbyMsgId).catch(() => null);
     if (msg) await msg.edit(lobbyPayload(game)).catch(() => {});
-    persist();
+    sync(game);
   }
 
   // Optionen-Panel (ephemeral, nur Host): Rollen, Wolfsanzahl, Zeitprofil, Aufdecken
@@ -316,7 +344,8 @@ module.exports = (client, logger = console) => {
     game.sent = {};
     game.pending = {};
     game.phaseKey = null;
-    persist();
+    ensureWeb();
+    sync(game);
 
     const failed = [];
     for (const p of state.players) if (!(await dm(p.id, { content: roleText(game, p.id) }))) failed.push(p.id);
@@ -325,6 +354,7 @@ module.exports = (client, logger = console) => {
       content: [
         '🐺 **Das Spiel beginnt!** Rollen wurden per DM verschickt.',
         setup.text,
+        boardLink(game) ? `📋 Spielplan: ${boardLink(game)}` : '',
         failed.length ? `⚠️ DM fehlgeschlagen für ${failed.map(mention).join(', ')} – nutzt den Button „Meine Rolle“.` : '',
       ].filter(Boolean).join('\n'),
       components: failed.length ? [row(btn(`${TYPE}:role:${game.guildId}`, '🎴 Meine Rolle', ButtonStyle.Primary))] : [],
@@ -445,6 +475,7 @@ module.exports = (client, logger = console) => {
     }
     sessions.remove(game.guildId);
     persist();
+    if (webBase) setTimeout(() => board.remove(game.code), 60 * 60 * 1000).unref(); // Endstand 1 h sichtbar
   }
 
   // Events verarbeiten, Phasenwechsel (Frist, Voice, Thread), dann Prompts verschicken.
@@ -463,7 +494,7 @@ module.exports = (client, logger = console) => {
     }
     if (events.length === 1 && events[0].type === 'vote_cast') await updateVoteMessage(game);
 
-    if (s.phase === PHASE.GAME_OVER) { await finishGame(game); return; }
+    if (s.phase === PHASE.GAME_OVER) { sync(game); await finishGame(game); return; }
 
     if (phaseChanged) {
       game.phaseKey = key;
@@ -473,14 +504,14 @@ module.exports = (client, logger = console) => {
       if (s.phase === PHASE.NIGHT) await lockThread(game, false);
       else if (s.phase === PHASE.DAY_DISCUSS) await lockThread(game, true);
     }
-    persist();
+    sync(game);
     if (s.phase !== PHASE.DAY_VOTE && s.phase !== PHASE.DAY_DISCUSS) {
       for (const id of new Set(W.waitingFor(s))) {
         if (game.sent[id]) continue;
         game.sent[id] = true;
         await sendPrompt(game, id);
       }
-      persist();
+      sessions.persist();
     }
   }
 
@@ -550,6 +581,7 @@ module.exports = (client, logger = console) => {
         || interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild);
       if (!allowed) return interaction.reply({ content: '❌ Nur der Host oder Manage Server.', flags: EPHEMERAL });
       if (game.state) await finishGame(game); else { sessions.remove(gid); persist(); }
+      board.remove(game.code);
       return interaction.reply('🛑 Werwolf wurde abgebrochen.');
     }
     // start
@@ -562,9 +594,10 @@ module.exports = (client, logger = console) => {
       lobbyMsgId: null, voteMsgId: null, threadId: null, phaseKey: null, sent: {}, pending: {}, muted: {},
     };
     sessions.set(gid, g);
+    ensureWeb();
     const msg = await say(g, lobbyPayload(g));
     g.lobbyMsgId = msg?.id || null;
-    persist();
+    sync(g);
     await interaction.editReply(fromVoice
       ? `✅ Lobby geöffnet, ${lobby.length} Spieler aus deinem Sprachkanal übernommen. Über „⚙️ Optionen“ stellst du Rollen und Zeiten ein.`
       : '✅ Lobby geöffnet. Tipp: Starte aus einem Sprachkanal, dann werden alle dort übernommen.');
@@ -584,7 +617,7 @@ module.exports = (client, logger = console) => {
       const res = applyLobbyAction(game, action, interaction, LIMITS);
       if (res.error) return reply(res.error);
       if (res.closed) {
-        sessions.remove(gid); persist();
+        sessions.remove(gid); persist(); board.remove(game.code);
         return interaction.update({ content: 'Lobby geschlossen.', embeds: [], components: [] });
       }
       if (res.begin) {
@@ -708,6 +741,7 @@ module.exports = (client, logger = console) => {
     g.options ||= defaultOptions();
     g.sent ||= {}; g.pending ||= {}; g.muted ||= {};
     restored += 1;
+    if (webBase) { ensureWeb(); board.publish(g.code, view(g)); }
   }
   if (restored) quiet(`🐺 Werwolf: ${restored} Spiel(e) wiederhergestellt.`);
   setInterval(() => tick().catch((err) => logger.error('❌ Werwolf: Tick-Fehler:', err)), TICK_MS).unref();
