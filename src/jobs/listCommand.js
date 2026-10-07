@@ -38,6 +38,9 @@ module.exports = (client, logger = console) => {
       '`/serverstatus test`',
       '→ Postet ein regelmäßig aktualisiertes Server-Status-Embed. *(Benötigt: Manage Channels oder Manage Server)*',
       '',
+      '`/sh start` · `/sh status` · `/sh abbrechen` · `/sh regeln`',
+      '→ Secret Hitler im Sprachkanal spielen (Rollen per DM, Spielplan als Webseite).',
+      '',
       '`/chat message:` oder **@Bot** <Nachricht>',
       '→ Chattet mit dem Bot via AI. Schreibe `reset` als Nachricht um den Verlauf zu löschen.',
     ];

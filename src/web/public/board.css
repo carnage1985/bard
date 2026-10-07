@@ -1,0 +1,32 @@
+:root{--bg:#1b1a19;--card:#2a2826;--fg:#eee8dc;--mut:#9a9488;--lib:#3b82c4;--fas:#c8442f;--ok:#4caf6a}
+@media (prefers-color-scheme: light){:root{--bg:#f4efe4;--card:#fff;--fg:#25221e;--mut:#6b655b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px}
+h1{margin:0;font-size:1.4rem;letter-spacing:.08em;text-transform:uppercase}
+h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);margin:0 0 8px}
+main{max-width:960px;margin:0 auto;padding:0 16px 16px;display:grid;gap:16px}
+section,.track{background:var(--card);border-radius:10px;padding:12px}
+.tracks{display:grid;gap:12px;background:none;padding:0}
+.slots{display:flex;gap:8px;flex-wrap:wrap}
+.slot{width:64px;height:88px;border:2px dashed var(--mut);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.7rem;text-align:center;color:var(--mut);padding:2px}
+.slot .ic{font-size:1.4rem}
+.slot.on{border-style:solid;color:#fff}
+.lib .slot.on{background:var(--lib);border-color:var(--lib)}
+.fas .slot.on{background:var(--fas);border-color:var(--fas)}
+.meta{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+.dots span{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--mut);margin-left:4px;vertical-align:middle}
+.dots span.on{background:var(--fas);border-color:var(--fas)}
+.players{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.players li{padding:8px 10px;border-radius:8px;border:2px solid transparent;background:var(--bg)}
+.players li.dead{opacity:.45;text-decoration:line-through}
+.players li.pres{border-color:#d4a72c}
+.players li.chan{border-color:var(--ok)}
+.tag{font-size:.7rem;margin-left:6px;padding:1px 6px;border-radius:99px;background:var(--mut);color:var(--bg)}
+.log{margin:0;padding-left:20px;color:var(--mut);max-height:240px;overflow:auto;display:flex;flex-direction:column-reverse}
+.banner{font-size:1.2rem;font-weight:700;text-align:center}
+.banner.L{background:var(--lib);color:#fff}.banner.F{background:var(--fas);color:#fff}
+.status{font-size:.8rem;color:var(--mut)}
+footer{max-width:960px;margin:0 auto;padding:16px;font-size:.75rem;color:var(--mut)}
+a{color:inherit}
+@media(min-width:720px){.tracks{grid-template-columns:1fr 1fr}}
