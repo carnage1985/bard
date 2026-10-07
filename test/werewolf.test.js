@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const W = require('../src/games/werewolf/engine');
-const { ROLE, PHASE } = W;
+const { registerRole, unregisterRole, allRoles } = require('../src/games/werewolf/roles');
+const { PHASE, TEAMS } = W;
 
 function mulberry(seed) {
   return () => {
@@ -16,7 +17,6 @@ const mk = (n, rng = mulberry(3), options = {}) => W.createGame({
   code: 'x', hostId: 'p0', rng, options,
   players: Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}` })),
 });
-const withRole = (s, role) => s.players.filter((p) => p.role === role);
 
 // Setzt Rollen deterministisch (Reihenfolge der Spieler).
 function setup(roles, options) {
@@ -25,98 +25,112 @@ function setup(roles, options) {
   return s;
 }
 
-test('Rollenzusammenstellung je Spielerzahl', () => {
+const act = (s, id, input) => W.nightAction(s, id, input);
+const target = (s, id, targetId) => W.nightAction(s, id, { targetId });
+
+test('Rollen sind in drei Seiten eingeteilt (Dorf, Werwolf, Neutral)', () => {
+  const teams = new Set(allRoles().map((r) => r.team));
+  assert.deepStrictEqual([...teams].sort(), [TEAMS.NEUTRAL, TEAMS.VILLAGE, TEAMS.WOLVES].sort());
+  assert.ok(W.rolesOfTeam(TEAMS.WOLVES).some((r) => r.id === 'werewolf'));
+  assert.ok(W.rolesOfTeam(TEAMS.NEUTRAL).some((r) => r.id === 'jester'));
+  assert.ok(W.rolesOfTeam(TEAMS.VILLAGE).some((r) => r.id === 'seer'));
+});
+
+test('Rollenzusammenstellung je Spielerzahl, Host-Override', () => {
   for (let n = W.MIN_PLAYERS; n <= W.MAX_PLAYERS; n++) {
     const roles = W.rolesFor(n);
     assert.strictEqual(roles.length, n);
-    assert.ok(roles.filter((r) => r === ROLE.WEREWOLF).length >= 1);
-    assert.ok(roles.includes(ROLE.SEER));
-    const s = mk(n);
-    assert.strictEqual(s.players.length, n);
+    assert.ok(roles.includes('werewolf'));
+    assert.ok(roles.includes('seer'));
+    assert.strictEqual(mk(n).players.length, n);
   }
+  assert.ok(!W.rolesFor(10, { roles: { witch: false } }).includes('witch'));
+  assert.ok(W.rolesFor(10, { roles: { jester: 1 } }).includes('jester'));
+  assert.ok(!W.rolesFor(10).includes('jester'));
   assert.throws(() => mk(4));
   assert.throws(() => mk(17));
 });
 
 test('Wölfe kennen sich, andere nicht', () => {
   const s = mk(9);
+  const wolves = s.players.filter((p) => p.role === 'werewolf').length;
   for (const p of s.players) {
     const info = W.roleInfo(s, p.id);
-    if (p.role === ROLE.WEREWOLF) assert.strictEqual(info.teammates.length, withRole(s, ROLE.WEREWOLF).length - 1);
-    else assert.strictEqual(info.teammates.length, 0);
+    assert.strictEqual(info.teammates.length, p.role === 'werewolf' ? wolves - 1 : 0);
+    assert.ok(info.teamName && info.name);
   }
 });
 
+const night1 = () => setup(['werewolf', 'seer', 'doctor', 'witch', 'villager', 'villager', 'villager', 'villager']);
+
 test('Wolfsopfer stirbt; Doktor-Schutz rettet; Heiltrank rettet', () => {
-  // p0 Wolf, p1 Seher, p2 Doktor, p3 Hexe, p4..p7 Dorf
-  const mkGame = () => setup(['werewolf', 'seer', 'doctor', 'witch', 'villager', 'villager', 'villager', 'villager']);
-  let s = mkGame();
-  W.wolfVote(s, 'p0', 'p4');
-  W.seerInspect(s, 'p1', 'p0');
-  W.doctorProtect(s, 'p2', 'p5');
-  let ev = W.witchAct(s, 'p3', {});
+  let s = night1();
+  target(s, 'p0', 'p4'); target(s, 'p1', 'p0'); target(s, 'p2', 'p5');
+  const ev = act(s, 'p3', {});
   assert.strictEqual(s.phase, PHASE.DAY_DISCUSS);
   assert.ok(!s.players[4].alive);
   assert.deepStrictEqual(ev.find((e) => e.type === 'dawn').deaths.map((d) => d.id), ['p4']);
 
-  s = mkGame();
-  W.wolfVote(s, 'p0', 'p4');
-  W.seerInspect(s, 'p1', 'p0');
-  W.doctorProtect(s, 'p2', 'p4');
-  W.witchAct(s, 'p3', {});
+  s = night1();
+  target(s, 'p0', 'p4'); target(s, 'p1', 'p0'); target(s, 'p2', 'p4'); act(s, 'p3', {});
   assert.ok(s.players[4].alive, 'Doktor schützt');
 
-  s = mkGame();
-  W.wolfVote(s, 'p0', 'p4');
-  W.seerInspect(s, 'p1', 'p0');
-  W.doctorProtect(s, 'p2', 'p5');
-  W.witchAct(s, 'p3', { heal: true });
+  s = night1();
+  target(s, 'p0', 'p4'); target(s, 'p1', 'p0'); target(s, 'p2', 'p5'); act(s, 'p3', { heal: true });
   assert.ok(s.players[4].alive, 'Hexe heilt');
-  assert.strictEqual(s.witch.heal, false);
+  assert.strictEqual(s.roleState.witch.heal, false);
 });
 
-test('Seher sieht Werwolf-Status, Hexe darf erst nach den Wölfen', () => {
+test('Seher sieht Werwolf-Status, Hexe erst nach den Wölfen', () => {
   const s = setup(['werewolf', 'seer', 'witch', 'villager', 'villager']);
-  assert.throws(() => W.witchAct(s, 'p2', {}), /Rudel/);
-  const ev = W.seerInspect(s, 'p1', 'p0');
+  assert.throws(() => act(s, 'p2', {}), /noch nicht dran/);
+  const ev = target(s, 'p1', 'p0');
   assert.strictEqual(ev.find((e) => e.type === 'seer_result').isWolf, true);
-  assert.throws(() => W.seerInspect(s, 'p1', 'p3'));
+  assert.throws(() => target(s, 'p1', 'p3'), /schon entschieden/);
 });
 
-test('Hexe: Gift tötet, Trank nur einmal', () => {
+test('Hexe: Gift tötet, Trank nur einmal; Prompt kommt nach der Wolfswahl', () => {
   const s = setup(['werewolf', 'seer', 'witch', 'villager', 'villager', 'villager']);
-  W.wolfVote(s, 'p0', 'p3');
-  W.seerInspect(s, 'p1', 'p3');
-  W.witchAct(s, 'p2', { poisonId: 'p4' });
+  const ev = target(s, 'p0', 'p3');
+  const prompt = ev.find((e) => e.type === 'witch_prompt');
+  assert.strictEqual(prompt.to, 'p2');
+  assert.strictEqual(prompt.victimId, 'p3');
+  target(s, 'p1', 'p3');
+  act(s, 'p2', { poisonId: 'p4' });
   assert.ok(!s.players[3].alive && !s.players[4].alive);
-  assert.strictEqual(s.witch.poison, false);
+  assert.strictEqual(s.roleState.witch.poison, false);
 });
 
 test('Doktor-Sperre in Folgenacht', () => {
   const s = setup(['werewolf', 'seer', 'doctor', 'villager', 'villager', 'villager', 'villager']);
-  W.wolfVote(s, 'p0', 'p5'); W.seerInspect(s, 'p1', 'p0'); W.doctorProtect(s, 'p2', 'p3');
+  target(s, 'p0', 'p5'); target(s, 'p1', 'p0'); target(s, 'p2', 'p3');
   W.startVote(s);
   for (const p of s.players.filter((x) => x.alive)) W.vote(s, p.id, null);
   assert.strictEqual(s.phase, PHASE.NIGHT);
-  assert.throws(() => W.doctorProtect(s, 'p2', 'p3'));
-  W.doctorProtect(s, 'p2', 'p2');
+  assert.throws(() => target(s, 'p2', 'p3'));
+  target(s, 'p2', 'p2');
 });
 
-test('Abstimmung: Mehrheit lyncht', () => {
-  const s = setup(['werewolf', 'seer', 'villager', 'villager', 'villager', 'villager', 'villager']);
-  W.forceAdvance(s); // Nacht ohne Aktionen
+test('Rudel: Umentscheiden erlaubt, Gleichstand entscheidet der Zufall', () => {
+  const s = setup(['werewolf', 'werewolf', 'seer', 'villager', 'villager', 'villager']);
+  target(s, 'p0', 'p3');
+  target(s, 'p0', 'p4'); // umentschieden
+  const ev = target(s, 'p1', 'p5');
+  const dec = ev.find((e) => e.type === 'wolves_decided');
+  assert.ok(['p4', 'p5'].includes(dec.victimId));
+});
+
+test('Abstimmung: Mehrheit lyncht, Gleichstand niemand', () => {
+  let s = setup(['werewolf', 'seer', 'villager', 'villager', 'villager', 'villager', 'villager']);
+  W.forceAdvance(s);
   assert.strictEqual(s.phase, PHASE.DAY_DISCUSS);
   assert.ok(s.players.every((p) => p.alive));
   W.startVote(s);
   for (const p of s.players) W.vote(s, p.id, p.id === 'p2' ? 'p3' : 'p2');
-  assert.ok(!s.players[2].alive);
   assert.strictEqual(s.players[2].deathCause, 'lynch');
-});
 
-test('Gleichstand lyncht niemanden', () => {
-  const s = setup(['werewolf', 'seer', 'villager', 'villager', 'villager', 'villager']);
+  s = setup(['werewolf', 'seer', 'villager', 'villager', 'villager', 'villager']);
   W.forceAdvance(s); W.startVote(s);
-  // p0,p1,p2 -> p3 ; p3,p4,p5 -> p0  => 3:3
   const t = { p0: 'p3', p1: 'p3', p2: 'p3', p3: 'p0', p4: 'p0', p5: 'p0' };
   let ev;
   for (const id of Object.keys(t)) ev = W.vote(s, id, t[id]);
@@ -125,40 +139,78 @@ test('Gleichstand lyncht niemanden', () => {
   assert.strictEqual(s.phase, PHASE.NIGHT);
 });
 
-test('Jäger schießt nach dem Tod', () => {
+test('Jäger schießt nach dem Tod (Tod-Aktion)', () => {
   const s = setup(['werewolf', 'seer', 'hunter', 'villager', 'villager', 'villager', 'villager']);
   W.forceAdvance(s); W.startVote(s);
   for (const p of s.players) W.vote(s, p.id, p.id === 'p2' ? 'p3' : 'p2');
-  assert.strictEqual(s.phase, PHASE.HUNTER);
-  assert.throws(() => W.hunterShoot(s, 'p3', 'p0'));
-  W.hunterShoot(s, 'p2', 'p0');
-  assert.strictEqual(s.winner, W.VILLAGE);
+  assert.strictEqual(s.phase, PHASE.DEATH_TRIGGER);
+  assert.throws(() => W.deathAction(s, 'p3', 'p0'));
+  W.deathAction(s, 'p2', 'p0');
+  assert.strictEqual(s.winner, TEAMS.VILLAGE);
+});
+
+test('Neutrale Rolle (Narr) gewinnt allein, wenn gelyncht', () => {
+  const s = setup(['werewolf', 'seer', 'jester', 'villager', 'villager', 'villager'], { roles: { jester: 1 } });
+  W.forceAdvance(s); W.startVote(s);
+  let ev;
+  for (const p of s.players) ev = W.vote(s, p.id, p.id === 'p2' ? 'p3' : 'p2');
+  const over = ev.find((e) => e.type === 'game_over');
+  assert.strictEqual(over.winner, TEAMS.NEUTRAL);
+  assert.deepStrictEqual(over.playerIds, ['p2']);
 });
 
 test('Sieg der Wölfe bei Gleichstand der Anzahl', () => {
   const s = setup(['werewolf', 'seer', 'villager', 'villager', 'villager']);
-  s.players[2].alive = false;
-  s.players[3].alive = false;
-  s.players[4].alive = false;
-  assert.strictEqual(W.checkWin(s).winner, W.WOLVES);
+  s.players[2].alive = false; s.players[3].alive = false; s.players[4].alive = false;
+  assert.strictEqual(W.checkWin(s).winner, TEAMS.WOLVES);
 });
 
 test('publicView verrät keine Rollen lebender Spieler', () => {
   const s = mk(8);
   assert.ok(W.publicView(s).players.every((p) => p.role === null));
-  W.forceAdvance(s);
-  W.startVote(s);
-  const alive = s.players.filter((p) => p.alive);
-  for (const p of alive) W.vote(s, p.id, alive.find((x) => x.id !== p.id).id);
-  const v = W.publicView(s);
-  assert.ok(v.players.filter((p) => p.alive).every((p) => p.role === null));
+  W.forceAdvance(s); W.startVote(s);
+  const al = s.players.filter((p) => p.alive);
+  for (const p of al) W.vote(s, p.id, al.find((x) => x.id !== p.id).id);
+  assert.ok(W.publicView(s).players.filter((p) => p.alive).every((p) => p.role === null));
 });
 
-test('1000 Zufallsspiele terminieren', () => {
+// --- Erweiterbarkeit: neue Rolle ohne Änderung an der Engine ---
+test('Eigene Rolle per registerRole (Leibwächter) funktioniert ohne Engine-Änderung', () => {
+  registerRole({
+    id: 'bodyguard', name: 'Leibwächter', emoji: '🛡️', team: TEAMS.VILLAGE, order: 35,
+    night: {
+      resolveOrder: 10,
+      targets: (s, actor) => s.players.filter((p) => p.alive && p.id !== actor.id),
+      normalize(s, actor, input) {
+        if (!this.targets(s, actor).some((p) => p.id === input.targetId)) throw new Error('Ungültiges Ziel.');
+        return { targetId: input.targetId };
+      },
+      resolve(s, ns, ctx) { for (const d of Object.values(ns.data.bodyguard || {})) if (d.targetId) ctx.protected.add(d.targetId); },
+    },
+  });
+  try {
+    const s = setup(['werewolf', 'seer', 'bodyguard', 'villager', 'villager', 'villager']);
+    target(s, 'p0', 'p3'); target(s, 'p1', 'p0');
+    assert.strictEqual(s.phase, PHASE.NIGHT, 'wartet auf den Leibwächter');
+    assert.deepStrictEqual(W.waitingFor(s), ['p2']);
+    target(s, 'p2', 'p3');
+    assert.ok(s.players[3].alive, 'Leibwächter schützt');
+    assert.ok(W.rolesFor(6, { roles: { bodyguard: 1 } }).includes('bodyguard'));
+  } finally {
+    unregisterRole('bodyguard');
+  }
+});
+
+test('Ungültige Rollen-Definition wird abgelehnt', () => {
+  assert.throws(() => registerRole({ id: 'x', name: 'X', team: 'andere' }));
+  assert.throws(() => registerRole({ id: 'y', name: 'Y', team: TEAMS.VILLAGE, night: {} }));
+});
+
+test('1000 Zufallsspiele terminieren (mit Narr)', () => {
   for (let g = 0; g < 1000; g++) {
     const rng = mulberry(g + 11);
     const n = 5 + (g % 12);
-    const s = mk(n, rng);
+    const s = mk(n, rng, g % 3 === 0 ? { roles: { jester: 1 } } : {});
     const pick = (arr) => arr[Math.floor(rng() * arr.length)];
     let steps = 0;
     while (s.phase !== PHASE.GAME_OVER) {
@@ -171,14 +223,13 @@ test('1000 Zufallsspiele terminieren', () => {
           if (rng() < 0.1) { W.forceAdvance(s, rng); break; }
           const actorId = pick(waiting);
           const actor = s.players.find((p) => p.id === actorId);
-          if (actor.role === ROLE.WEREWOLF) W.wolfVote(s, actor.id, pick(W.nightTargets(s, ROLE.WEREWOLF)).id, rng);
-          else if (actor.role === ROLE.SEER) W.seerInspect(s, actor.id, pick(W.nightTargets(s, ROLE.SEER, actor.id)).id, rng);
-          else if (actor.role === ROLE.DOCTOR) W.doctorProtect(s, actor.id, pick(W.nightTargets(s, ROLE.DOCTOR)).id, rng);
-          else {
-            const act = {};
-            if (s.witch.heal && s.nightState.victimId && rng() < 0.5) act.heal = true;
-            if (s.witch.poison && rng() < 0.4) act.poisonId = pick(W.nightTargets(s, ROLE.WITCH, actor.id)).id;
-            W.witchAct(s, actor.id, act, rng);
+          if (actor.role === 'witch') {
+            const input = {};
+            if (s.roleState.witch.heal && s.nightState.shared.victimId && rng() < 0.5) input.heal = true;
+            if (s.roleState.witch.poison && rng() < 0.4) input.poisonId = pick(W.nightTargets(s, actorId)).id;
+            W.nightAction(s, actorId, input, rng);
+          } else {
+            W.nightAction(s, actorId, { targetId: pick(W.nightTargets(s, actorId)).id }, rng);
           }
           break;
         }
@@ -187,15 +238,12 @@ test('1000 Zufallsspiele terminieren', () => {
           if (rng() < 0.1) { W.forceAdvance(s, rng); break; }
           for (const p of al) {
             if (s.phase !== PHASE.DAY_VOTE) break;
-            const others = al.filter((x) => x.id !== p.id);
-            W.vote(s, p.id, rng() < 0.2 ? null : pick(others).id);
+            W.vote(s, p.id, rng() < 0.2 ? null : pick(al.filter((x) => x.id !== p.id)).id);
           }
           break;
-        case PHASE.HUNTER: {
-          const targets = al;
-          W.hunterShoot(s, s.pendingHunterId, rng() < 0.3 ? null : pick(targets).id);
+        case PHASE.DEATH_TRIGGER:
+          W.deathAction(s, s.pendingTriggerId, rng() < 0.3 ? null : pick(W.deathTargets(s, s.pendingTriggerId)).id);
           break;
-        }
         default: assert.fail(`Unbekannte Phase ${s.phase}`);
       }
     }

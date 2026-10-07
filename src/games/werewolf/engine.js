@@ -1,33 +1,23 @@
 // Reine Spiellogik für Werwolf/Mafia (keine Discord-/IO-Abhängigkeiten).
-// Gleiches Muster wie secretHitler/engine.js: Aktionen mutieren den Zustand, werfen bei
-// illegalen Zügen einen Error und geben Events zurück (Events mit `to` sind privat).
-// Zeit steuert die Discord-Schicht: bei Ablauf einer Frist ruft sie forceAdvance() auf.
-// `state.deadline` (ms) setzt die Schicht selbst; es wird nur durchgereicht (Board-Countdown).
+// Die Engine kennt KEINE konkrete Rolle: alle Rollen-Eigenschaften (Team, Nachtaktion, Tod-Trigger,
+// Auflösung, Sondersiege) stehen als Daten/Hooks in roles/<rolle>.js (siehe roles/_template.js).
+// Aktionen mutieren den Zustand, werfen bei illegalen Zügen einen Error und geben Events zurück
+// (Events mit `to` sind privat). Zeit steuert die Discord-Schicht: bei Ablauf einer Frist ruft sie
+// forceAdvance() auf; `state.deadline` (ms) setzt sie selbst und es wird nur durchgereicht.
+const { TEAMS, TEAM_INFO } = require('./teams');
+const { getRole, allRoles, rolesOfTeam } = require('./roles');
 
 const PHASE = {
   NIGHT: 'NIGHT',
   DAY_DISCUSS: 'DAY_DISCUSS',
   DAY_VOTE: 'DAY_VOTE',
-  HUNTER: 'HUNTER',
+  DEATH_TRIGGER: 'DEATH_TRIGGER', // Tod-Aktion einer Rolle (z. B. Jäger)
   GAME_OVER: 'GAME_OVER',
 };
 
-const ROLE = {
-  VILLAGER: 'villager',
-  WEREWOLF: 'werewolf',
-  SEER: 'seer',
-  DOCTOR: 'doctor',
-  WITCH: 'witch',
-  HUNTER: 'hunter',
-};
-
-const VILLAGE = 'village';
-const WOLVES = 'wolves';
-
 const MIN_PLAYERS = 5;
 const MAX_PLAYERS = 16;
-
-const DEFAULT_OPTIONS = { revealRoles: true, doctor: null, witch: null, hunter: null };
+const DEFAULT_OPTIONS = { revealRoles: true, roles: {} }; // roles: { <rolleId>: Anzahl | true | false }
 
 function fail(msg) {
   throw new Error(msg);
@@ -42,16 +32,20 @@ function shuffle(arr, rng = Math.random) {
   return a;
 }
 
-// Rollen-Zusammenstellung je Spielerzahl; `null` bei Optionen = automatisch nach Größe.
+// Rollen-Zusammenstellung: pro Rolle `defaultCount(n)`, Host-Override via options.roles,
+// Rollen mit `fill` (Dorfbewohner) füllen auf. Reihenfolge = Rolle.order, überzählige fallen hinten weg.
 function rolesFor(n, options = {}) {
-  const o = { ...DEFAULT_OPTIONS, ...options };
-  const wolves = Math.max(1, Math.round(n / 4));
-  const roles = Array(wolves).fill(ROLE.WEREWOLF);
-  roles.push(ROLE.SEER);
-  if (o.doctor ?? n >= 6) roles.push(ROLE.DOCTOR);
-  if (o.hunter ?? n >= 7) roles.push(ROLE.HUNTER);
-  if (o.witch ?? n >= 8) roles.push(ROLE.WITCH);
-  while (roles.length < n) roles.push(ROLE.VILLAGER);
+  const overrides = options.roles || {};
+  const roles = [];
+  for (const role of allRoles()) {
+    if (role.fill) continue;
+    const o = overrides[role.id];
+    const count = o === undefined ? (role.defaultCount?.(n, options) ?? 0) : Number(o);
+    for (let i = 0; i < count; i++) roles.push(role.id);
+  }
+  const filler = allRoles().find((r) => r.fill);
+  if (!filler) fail('Keine Füllrolle registriert.');
+  while (roles.length < n) roles.push(filler.id);
   return roles.slice(0, n);
 }
 
@@ -60,27 +54,31 @@ function createGame({ code, hostId, players, rng = Math.random, options = {} }) 
   if (n < MIN_PLAYERS || n > MAX_PLAYERS) fail(`Werwolf braucht ${MIN_PLAYERS}–${MAX_PLAYERS} Spieler.`);
   if (new Set(players.map((p) => p.id)).size !== n) fail('Doppelte Spieler.');
 
-  const roles = shuffle(rolesFor(n, options), rng);
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const assigned = shuffle(rolesFor(n, opts), rng);
   const state = {
     code,
     hostId,
-    options: { ...DEFAULT_OPTIONS, ...options },
-    players: players.map((p, i) => ({ id: p.id, name: p.name, role: roles[i], alive: true, deathCause: null })),
+    options: opts,
+    players: players.map((p, i) => ({
+      id: p.id, name: p.name, role: assigned[i], alive: true, deathCause: null, triggered: false,
+    })),
     phase: PHASE.NIGHT,
-    night: 0, // Nummer der aktuellen/letzten Nacht
+    night: 0,
     day: 0,
-    witch: { heal: true, poison: true },
-    lastProtectedId: null,
+    roleState: {}, // rollenspezifischer Zustand (Tränke, letzter Schutz, …)
     nightState: null,
     votes: {},
-    pendingHunterId: null,
-    hunterUsed: false,
-    next: null, // 'day' | 'night' – wohin es nach dem Jägerschuss weitergeht
+    triggerQueue: [],
+    pendingTriggerId: null,
+    pendingWin: null,
+    next: null, // 'day' | 'night' – wohin es nach Tod-Aktionen weitergeht
     deadline: null,
     winner: null,
     winReason: null,
     log: [],
   };
+  for (const role of allRoles()) if (role.initState) state.roleState[role.id] = role.initState(state);
   startNight(state, []);
   return state;
 }
@@ -89,8 +87,8 @@ function createGame({ code, hostId, players, rng = Math.random, options = {} }) 
 
 const alive = (s) => s.players.filter((p) => p.alive);
 const byId = (s, id) => s.players.find((p) => p.id === id);
-const aliveWith = (s, role) => alive(s).filter((p) => p.role === role);
-const isWolf = (p) => p.role === ROLE.WEREWOLF;
+const roleOf = (p) => getRole(p.role);
+const teamOf = (p) => roleOf(p).team;
 
 function log(s, type, data = {}) {
   s.log.push({ type, night: s.night, day: s.day, ...data });
@@ -98,10 +96,14 @@ function log(s, type, data = {}) {
 }
 
 function checkWin(s) {
-  const wolves = alive(s).filter(isWolf).length;
-  const others = alive(s).length - wolves;
-  if (wolves === 0) return { winner: VILLAGE, reason: 'Alle Werwölfe sind tot' };
-  if (wolves >= others) return { winner: WOLVES, reason: 'Die Werwölfe haben das Dorf überrannt' };
+  for (const role of allRoles()) {
+    const win = role.checkWin?.(s);
+    if (win) return win;
+  }
+  const a = alive(s);
+  const wolves = a.filter((p) => teamOf(p) === TEAMS.WOLVES).length;
+  if (wolves === 0) return { winner: TEAMS.VILLAGE, reason: 'Alle Werwölfe sind tot' };
+  if (wolves >= a.length - wolves) return { winner: TEAMS.WOLVES, reason: 'Die Werwölfe haben das Dorf überrannt' };
   return null;
 }
 
@@ -109,17 +111,23 @@ function endGame(s, win, events) {
   s.phase = PHASE.GAME_OVER;
   s.winner = win.winner;
   s.winReason = win.reason;
+  s.winnerIds = win.playerIds || null; // bei Einzelsiegen neutraler Rollen
   s.deadline = null;
   log(s, 'game_over', win);
-  events.push({ type: 'game_over', winner: win.winner, reason: win.reason });
+  events.push({ type: 'game_over', winner: win.winner, reason: win.reason, playerIds: s.winnerIds });
 }
 
 function kill(s, id, cause) {
   const p = byId(s, id);
+  if (!p || !p.alive) return null;
   p.alive = false;
   p.deathCause = cause;
+  const win = roleOf(p).onDeath?.(s, p, cause);
+  if (win && !s.pendingWin) s.pendingWin = win; // Sondersieg (z. B. Narr), gilt nach Abschluss der Tod-Aktionen
   return p;
 }
+
+const publicRole = (s, p) => (s.options.revealRoles ? p.role : null);
 
 // ---------- Nacht ----------
 
@@ -127,174 +135,123 @@ function startNight(s, events) {
   s.night += 1;
   s.phase = PHASE.NIGHT;
   s.votes = {};
-  s.nightState = {
-    wolfVotes: {},
-    victimId: null, // vom Rudel gewählt
-    wolvesDone: false,
-    seerDone: false,
-    doctorDone: false,
-    witchDone: false,
-    protectId: null,
-    healed: false,
-    poisonId: null,
-  };
+  s.nightState = { data: {}, done: {}, opened: {}, shared: {} };
   log(s, 'night_start');
   events.push({ type: 'night_start', night: s.night });
 }
 
-function nightTargets(s, role, actorId) {
-  const a = alive(s);
-  if (role === ROLE.WEREWOLF) return a.filter((p) => !isWolf(p));
-  if (role === ROLE.SEER) return a.filter((p) => p.id !== actorId);
-  if (role === ROLE.DOCTOR) return a.filter((p) => p.id !== s.lastProtectedId);
-  if (role === ROLE.WITCH) return a.filter((p) => p.id !== actorId);
-  return [];
+// Rollen mit Nachtaktion, von denen mindestens ein lebender Spieler im Spiel ist.
+function nightRoles(s) {
+  const present = new Set(alive(s).map((p) => p.role));
+  return allRoles().filter((r) => r.night && present.has(r.id));
 }
 
-function requireNight(s, actorId, role) {
-  if (s.phase !== PHASE.NIGHT) fail('Gerade ist nicht Nacht.');
-  const p = byId(s, actorId);
-  if (!p || !p.alive || p.role !== role) fail('Du hast jetzt keine Aktion.');
-  return p;
+function actorsOf(s, role) {
+  return alive(s).filter((p) => p.role === role.id && (role.night.canAct ? role.night.canAct(s, p) : true));
 }
 
-function resolveWolfVotes(s, rng) {
-  const ns = s.nightState;
-  const tally = {};
-  for (const t of Object.values(ns.wolfVotes)) if (t) tally[t] = (tally[t] || 0) + 1;
-  const max = Math.max(0, ...Object.values(tally));
-  if (!max) { ns.victimId = null; return; }
-  const top = Object.keys(tally).filter((id) => tally[id] === max);
-  ns.victimId = top.length === 1 ? top[0] : top[Math.floor(rng() * top.length)];
+// Rolle ist "fertig", wenn niemand mehr von ihr aktiv ist oder alle Akteure abgegeben haben.
+function roleDone(s, ns, roleId) {
+  const role = getRole(roleId);
+  if (!role.night || !alive(s).some((p) => p.role === roleId)) return true;
+  return !!ns.done[roleId];
 }
 
-function witchHasPotions(s) {
-  return s.witch.heal || s.witch.poison;
-}
+const needsMet = (s, ns, role) => (role.night.needs || []).every((id) => roleDone(s, ns, id));
 
-// Prüft, ob alle nötigen Nachtaktionen vorliegen; löst die Nacht dann auf.
 function progressNight(s, events, rng) {
   const ns = s.nightState;
-  const wolves = aliveWith(s, ROLE.WEREWOLF);
-  if (!ns.wolvesDone && wolves.every((w) => w.id in ns.wolfVotes)) {
-    ns.wolvesDone = true;
-    resolveWolfVotes(s, rng);
-    events.push({ type: 'wolves_decided', victimId: ns.victimId, wolfIds: wolves.map((w) => w.id) });
-    const witch = aliveWith(s, ROLE.WITCH)[0];
-    if (witch && !ns.witchDone) {
-      if (witchHasPotions(s)) {
-        events.push({
-          type: 'witch_prompt', to: witch.id, victimId: ns.victimId,
-          canHeal: s.witch.heal && !!ns.victimId, canPoison: s.witch.poison,
-        });
-      } else {
-        ns.witchDone = true;
+  const roles = nightRoles(s);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const role of roles) {
+      if (ns.done[role.id] || !needsMet(s, ns, role)) continue;
+      const actors = actorsOf(s, role);
+      if (!ns.opened[role.id]) {
+        ns.opened[role.id] = true;
+        role.night.onOpen?.(s, ns, actors, events);
+      }
+      if (actors.every((a) => a.id in (ns.data[role.id] || {}))) {
+        ns.done[role.id] = true;
+        role.night.onDone?.(s, ns, events, rng);
+        changed = true;
       }
     }
   }
-  const seerPending = aliveWith(s, ROLE.SEER).length && !ns.seerDone;
-  const doctorPending = aliveWith(s, ROLE.DOCTOR).length && !ns.doctorDone;
-  const witchPending = aliveWith(s, ROLE.WITCH).length && !ns.witchDone;
-  if (ns.wolvesDone && !seerPending && !doctorPending && !witchPending) resolveNight(s, events, rng);
+  if (roles.every((r) => ns.done[r.id])) resolveNight(s, events, rng);
 }
 
-function resolveNight(s, events, rng) {
+// input: rollenspezifisch, z. B. { targetId } oder { heal, poisonId }
+function nightAction(s, actorId, input = {}, rng = Math.random) {
+  if (s.phase !== PHASE.NIGHT) fail('Gerade ist nicht Nacht.');
+  const actor = byId(s, actorId);
+  if (!actor || !actor.alive) fail('Du hast jetzt keine Aktion.');
+  const role = roleOf(actor);
+  if (!role.night) fail('Du hast nachts keine Aktion.');
   const ns = s.nightState;
+  if (!needsMet(s, ns, role)) fail('Du bist noch nicht dran.');
+  if (ns.done[role.id]) fail('Du hast dich schon entschieden.');
+  if (!actorsOf(s, role).some((p) => p.id === actorId)) fail('Du hast jetzt keine Aktion.');
+  const mine = ns.data[role.id] || (ns.data[role.id] = {});
+  if (actorId in mine && !role.night.revisable) fail('Du hast dich schon entschieden.');
+
+  const data = role.night.normalize(s, actor, input);
+  mine[actorId] = data;
+  const events = [{ type: 'night_action', userId: actorId, roleId: role.id, data }];
+  role.night.onSubmit?.(s, actor, data, events);
+  progressNight(s, events, rng);
+  return events;
+}
+
+function resolveNight(s, events) {
+  const ns = s.nightState;
+  const ctx = { attacks: [], protected: new Set() };
+  const order = (r) => r.night.resolveOrder ?? 50;
+  for (const role of allRoles().filter((r) => r.night).sort((a, b) => order(a) - order(b))) {
+    role.night.resolve?.(s, ns, ctx);
+  }
   const deaths = [];
-  if (ns.victimId && ns.protectId !== ns.victimId && !ns.healed) {
-    deaths.push({ id: ns.victimId, cause: 'wolves' });
+  for (const atk of ctx.attacks) {
+    if (atk.blockable && ctx.protected.has(atk.id)) continue;
+    if (deaths.some((d) => d.id === atk.id)) continue;
+    const p = kill(s, atk.id, atk.cause);
+    if (p) deaths.push({ id: p.id, cause: atk.cause });
   }
-  if (ns.poisonId && !deaths.some((d) => d.id === ns.poisonId)) {
-    deaths.push({ id: ns.poisonId, cause: 'witch' });
-  }
-  s.lastProtectedId = ns.protectId;
-  for (const d of deaths) kill(s, d.id, d.cause);
   s.nightState = null;
   s.day += 1;
   log(s, 'dawn', { deaths });
-  events.push({ type: 'dawn', deaths: deaths.map((d) => ({ ...d, role: s.options.revealRoles ? byId(s, d.id).role : null })) });
+  events.push({ type: 'dawn', deaths: deaths.map((d) => ({ ...d, role: publicRole(s, byId(s, d.id)) })) });
   afterDeaths(s, deaths.map((d) => d.id), 'day', events);
 }
 
-function wolfVote(s, actorId, targetId, rng = Math.random) {
-  requireNight(s, actorId, ROLE.WEREWOLF);
-  const ns = s.nightState;
-  if (ns.wolvesDone) fail('Das Rudel hat sich schon entschieden.');
-  if (!nightTargets(s, ROLE.WEREWOLF).some((p) => p.id === targetId)) fail('Ungültiges Ziel.');
-  ns.wolfVotes[actorId] = targetId;
-  const events = [{ type: 'wolf_vote', userId: actorId, targetId }];
-  progressNight(s, events, rng);
-  return events;
-}
-
-function seerInspect(s, actorId, targetId, rng = Math.random) {
-  requireNight(s, actorId, ROLE.SEER);
-  const ns = s.nightState;
-  if (ns.seerDone) fail('Du hast schon geschaut.');
-  const target = nightTargets(s, ROLE.SEER, actorId).find((p) => p.id === targetId);
-  if (!target) fail('Ungültiges Ziel.');
-  ns.seerDone = true;
-  const events = [{ type: 'seer_result', to: actorId, targetId, isWolf: isWolf(target) }];
-  progressNight(s, events, rng);
-  return events;
-}
-
-function doctorProtect(s, actorId, targetId, rng = Math.random) {
-  requireNight(s, actorId, ROLE.DOCTOR);
-  const ns = s.nightState;
-  if (ns.doctorDone) fail('Du hast schon geschützt.');
-  if (!nightTargets(s, ROLE.DOCTOR).some((p) => p.id === targetId)) fail('Dieser Spieler darf nicht geschützt werden.');
-  ns.protectId = targetId;
-  ns.doctorDone = true;
-  const events = [];
-  progressNight(s, events, rng);
-  return events;
-}
-
-// action: { heal: bool, poisonId?: string } – leer = passen
-function witchAct(s, actorId, action = {}, rng = Math.random) {
-  requireNight(s, actorId, ROLE.WITCH);
-  const ns = s.nightState;
-  if (!ns.wolvesDone) fail('Das Rudel hat noch nicht gewählt.');
-  if (ns.witchDone) fail('Du hast dich schon entschieden.');
-  if (action.heal) {
-    if (!s.witch.heal) fail('Der Heiltrank ist aufgebraucht.');
-    if (!ns.victimId) fail('Es gibt kein Opfer zu heilen.');
-    ns.healed = true;
-    s.witch.heal = false;
-  }
-  if (action.poisonId) {
-    if (!s.witch.poison) fail('Der Gifttrank ist aufgebraucht.');
-    if (!nightTargets(s, ROLE.WITCH, actorId).some((p) => p.id === action.poisonId)) fail('Ungültiges Ziel.');
-    ns.poisonId = action.poisonId;
-    s.witch.poison = false;
-  }
-  ns.witchDone = true;
-  const events = [];
-  progressNight(s, events, rng);
-  return events;
-}
-
-// ---------- Tote / Jäger / Weiterlauf ----------
+// ---------- Tod-Aktionen / Weiterlauf ----------
 
 function afterDeaths(s, deadIds, next, events) {
-  const hunter = deadIds.map((id) => byId(s, id)).find((p) => p.role === ROLE.HUNTER);
-  if (hunter && !s.hunterUsed) {
-    s.phase = PHASE.HUNTER;
-    s.pendingHunterId = hunter.id;
-    s.next = next;
-    s.hunterUsed = true;
-    log(s, 'hunter_pending', { hunterId: hunter.id });
-    events.push({ type: 'hunter_prompt', to: hunter.id, hunterId: hunter.id });
-    return;
+  s.next = next;
+  for (const id of deadIds) {
+    const p = byId(s, id);
+    if (roleOf(p).deathTrigger && !p.triggered && !s.triggerQueue.includes(id)) s.triggerQueue.push(id);
   }
-  proceed(s, next, events);
+  nextTrigger(s, events);
 }
 
-function proceed(s, next, events) {
-  s.pendingHunterId = null;
+function nextTrigger(s, events) {
+  const id = s.triggerQueue.shift();
+  if (!id) { proceed(s, events); return; }
+  const p = byId(s, id);
+  p.triggered = true;
+  s.phase = PHASE.DEATH_TRIGGER;
+  s.pendingTriggerId = id;
+  log(s, 'trigger_pending', { playerId: id, roleId: p.role });
+  events.push({ type: 'trigger_prompt', to: id, playerId: id, roleId: p.role });
+}
+
+function proceed(s, events) {
+  const next = s.next;
+  s.pendingTriggerId = null;
   s.next = null;
-  const win = checkWin(s);
+  const win = s.pendingWin || checkWin(s);
   if (win) { endGame(s, win, events); return; }
   if (next === 'day') {
     s.phase = PHASE.DAY_DISCUSS;
@@ -305,18 +262,22 @@ function proceed(s, next, events) {
   }
 }
 
-function hunterShoot(s, actorId, targetId) {
-  if (s.phase !== PHASE.HUNTER) fail('Gerade schießt niemand.');
-  if (actorId !== s.pendingHunterId) fail('Nur der Jäger schießt.');
+// targetId = null → verzichten
+function deathAction(s, actorId, targetId = null) {
+  if (s.phase !== PHASE.DEATH_TRIGGER) fail('Gerade gibt es keine Tod-Aktion.');
+  if (actorId !== s.pendingTriggerId) fail('Du bist nicht dran.');
+  const actor = byId(s, actorId);
+  const trigger = roleOf(actor).deathTrigger;
+  if (targetId && !trigger.targets(s, actor).some((p) => p.id === targetId)) fail('Ungültiges Ziel.');
   const events = [];
-  if (targetId) {
-    const target = alive(s).find((p) => p.id === targetId);
-    if (!target) fail('Ungültiges Ziel.');
-    kill(s, targetId, 'hunter');
-    log(s, 'hunter_shot', { hunterId: actorId, targetId });
-    events.push({ type: 'hunter_shot', hunterId: actorId, targetId, role: s.options.revealRoles ? target.role : null });
+  const killed = [];
+  for (const k of trigger.resolve(s, actor, targetId)) {
+    const p = kill(s, k.id, k.cause);
+    if (p) killed.push({ id: p.id, cause: k.cause, role: publicRole(s, p) });
   }
-  proceed(s, s.next, events);
+  log(s, 'death_trigger', { playerId: actorId, roleId: actor.role, kills: killed });
+  events.push({ type: 'death_trigger', playerId: actorId, roleId: actor.role, kills: killed });
+  afterDeaths(s, killed.map((k) => k.id), s.next, events);
   return events;
 }
 
@@ -352,33 +313,34 @@ function resolveVote(s, events) {
   log(s, 'vote_result', { lynchedId, tally });
   events.push({
     type: 'vote_result', votes, tally, lynchedId, tie: max > 0 && top.length > 1,
-    role: lynchedId && s.options.revealRoles ? byId(s, lynchedId).role : null,
+    role: lynchedId ? publicRole(s, byId(s, lynchedId)) : null,
   });
-  if (!lynchedId) { proceed(s, 'night', events); return; }
+  if (!lynchedId) { s.next = 'night'; proceed(s, events); return; }
   kill(s, lynchedId, 'lynch');
   afterDeaths(s, [lynchedId], 'night', events);
 }
 
 // ---------- Zeitablauf ----------
 
-// Fehlende Aktionen gelten als Enthaltung/Passen; für Timeouts der Discord-Schicht.
+// Fehlende Aktionen gelten als Passen/Enthaltung; für Timeouts der Discord-Schicht.
 function forceAdvance(s, rng = Math.random) {
   const events = [];
   switch (s.phase) {
     case PHASE.NIGHT: {
       const ns = s.nightState;
-      // Nur Wölfe, die noch nicht gewählt haben, enthalten sich (kein Opfer wegen Zeit).
-      for (const w of aliveWith(s, ROLE.WEREWOLF)) if (!(w.id in ns.wolfVotes)) ns.wolfVotes[w.id] = null;
-      progressNight(s, events, rng);
-      if (s.phase === PHASE.NIGHT) {
-        ns.seerDone = true; ns.doctorDone = true; ns.witchDone = true;
+      for (let i = 0; i <= allRoles().length && s.phase === PHASE.NIGHT; i++) {
+        for (const role of nightRoles(s)) {
+          if (ns.done[role.id] || !needsMet(s, ns, role)) continue;
+          const mine = ns.data[role.id] || (ns.data[role.id] = {});
+          for (const a of actorsOf(s, role)) if (!(a.id in mine)) mine[a.id] = { timeout: true };
+        }
         progressNight(s, events, rng);
       }
       break;
     }
     case PHASE.DAY_DISCUSS: events.push(...startVote(s)); break;
     case PHASE.DAY_VOTE: resolveVote(s, events); break;
-    case PHASE.HUNTER: events.push(...hunterShoot(s, s.pendingHunterId, null)); break;
+    case PHASE.DEATH_TRIGGER: events.push(...deathAction(s, s.pendingTriggerId, null)); break;
     default: break;
   }
   return events;
@@ -386,30 +348,46 @@ function forceAdvance(s, rng = Math.random) {
 
 // ---------- Sichten ----------
 
+// Wer wird gerade erwartet? (Status, Erinnerungen, Prompts)
 function waitingFor(s) {
   switch (s.phase) {
     case PHASE.NIGHT: {
       const ns = s.nightState;
       const ids = [];
-      if (!ns.wolvesDone) ids.push(...aliveWith(s, ROLE.WEREWOLF).filter((w) => !(w.id in ns.wolfVotes)).map((w) => w.id));
-      if (!ns.seerDone) ids.push(...aliveWith(s, ROLE.SEER).map((p) => p.id));
-      if (!ns.doctorDone) ids.push(...aliveWith(s, ROLE.DOCTOR).map((p) => p.id));
-      if (ns.wolvesDone && !ns.witchDone) ids.push(...aliveWith(s, ROLE.WITCH).map((p) => p.id));
+      for (const role of nightRoles(s)) {
+        if (ns.done[role.id] || !needsMet(s, ns, role)) continue;
+        for (const a of actorsOf(s, role)) if (!(a.id in (ns.data[role.id] || {}))) ids.push(a.id);
+      }
       return ids;
     }
     case PHASE.DAY_VOTE: return alive(s).filter((p) => !(p.id in s.votes)).map((p) => p.id);
-    case PHASE.HUNTER: return [s.pendingHunterId];
+    case PHASE.DEATH_TRIGGER: return [s.pendingTriggerId];
     default: return [];
   }
 }
 
+// Erlaubte Ziele einer Nachtaktion für den Akteur (für UI-Auswahl).
+function nightTargets(s, actorId) {
+  const actor = byId(s, actorId);
+  return roleOf(actor).night?.targets?.(s, actor) || [];
+}
+
+function deathTargets(s, actorId) {
+  const actor = byId(s, actorId);
+  return roleOf(actor).deathTrigger?.targets(s, actor) || [];
+}
+
+// Geheime Info für die Rollen-DM.
 function roleInfo(s, id) {
   const me = byId(s, id);
-  const info = { role: me.role, teammates: [] };
-  if (me.role === ROLE.WEREWOLF) {
-    info.teammates = s.players.filter((p) => isWolf(p) && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
-  }
-  return info;
+  const role = roleOf(me);
+  const teammates = role.knowsTeam
+    ? s.players.filter((p) => p.id !== id && teamOf(p) === role.team).map((p) => ({ id: p.id, name: p.name }))
+    : [];
+  return {
+    role: me.role, name: role.name, emoji: role.emoji, description: role.description,
+    team: role.team, teamName: TEAM_INFO[role.team].name, teamEmoji: TEAM_INFO[role.team].emoji, teammates,
+  };
 }
 
 // Öffentliche Sicht – keine Rollen lebender Spieler, keine Nachtaktionen.
@@ -424,7 +402,6 @@ function publicView(s) {
     isNight: s.phase === PHASE.NIGHT,
     deadline: s.deadline,
     aliveCount: alive(s).length,
-    wolvesAlive: over ? alive(s).filter(isWolf).length : null,
     players: s.players.map((p) => ({
       id: p.id,
       name: p.name,
@@ -435,12 +412,13 @@ function publicView(s) {
     })),
     winner: s.winner,
     winReason: s.winReason,
+    winnerIds: s.winnerIds || null,
     log: s.log.slice(-30),
   };
 }
 
 module.exports = {
-  PHASE, ROLE, VILLAGE, WOLVES, MIN_PLAYERS, MAX_PLAYERS,
-  createGame, rolesFor, wolfVote, seerInspect, doctorProtect, witchAct, hunterShoot,
-  startVote, vote, forceAdvance, nightTargets, waitingFor, roleInfo, publicView, checkWin, shuffle,
+  PHASE, TEAMS, TEAM_INFO, rolesOfTeam, MIN_PLAYERS, MAX_PLAYERS,
+  createGame, rolesFor, nightAction, deathAction, startVote, vote, forceAdvance,
+  nightTargets, deathTargets, waitingFor, roleInfo, publicView, checkWin, shuffle,
 };
