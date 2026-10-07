@@ -47,3 +47,7 @@ Avalon/Resistance (sehr ähnlich zu SH, Team-Votes + Quests), Spyfall/Insider (W
 
 ## Verifikation
 `npm test` (Engine-Tests pro Spiel), Fake-Client-Smoke-Test wie bei SH, danach manueller Test mit 5+ Accounts auf Testserver; Refactor-Regressionstest: SH-Spiel vor/nach dem Refactor identisch spielbar, laufendes Spiel überlebt Neustart.
+
+## Status
+- ✅ Schritt 1 (Refactor): `src/games/core/` mit `store.js` (games.json, Migration von secretHitler.json), `sessions.js` (ein Spiel pro Server, Feld `type`), `messenger.js` (say/dm/deliverPrivate/setMute, Button-/Select-Builder), `lobby.js` (Voice-Übernahme, join/leave/begin). `src/jobs/secretHitler.js` nutzt den Kern, Verhalten unverändert.
+- ⏳ Schritt 2: `/game`-Command + Spielregister (Plugin-Schnittstelle) – noch offen. Prompt-/DM-Fallback („Meine Aktion“) und Vote-Message liegen noch in `secretHitler.js` und werden bei Bedarf des 2. Spiels in den Kern gehoben.
