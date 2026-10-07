@@ -15,7 +15,7 @@ function collectLobby(interaction, max) {
 }
 
 // `prefix` = customId-Präfix des Spiels (z. B. "sh"), Buttons: <prefix>:join|leave|begin
-function lobbyPayload(game, { prefix, title, min, max, link, hint }) {
+function lobbyPayload(game, { prefix, title, min, max, link, hint, extraButtons = [] }) {
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setDescription([
@@ -32,6 +32,7 @@ function lobbyPayload(game, { prefix, title, min, max, link, hint }) {
       btn(`${prefix}:join`, 'Beitreten', ButtonStyle.Success),
       btn(`${prefix}:leave`, 'Verlassen'),
       btn(`${prefix}:begin`, 'Spiel starten', ButtonStyle.Primary),
+      ...extraButtons,
     )],
     allowedMentions: { parse: [] },
   };

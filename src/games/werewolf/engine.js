@@ -32,9 +32,8 @@ function shuffle(arr, rng = Math.random) {
   return a;
 }
 
-// Rollen-Zusammenstellung: pro Rolle `defaultCount(n)`, Host-Override via options.roles,
-// Rollen mit `fill` (Dorfbewohner) füllen auf. Reihenfolge = Rolle.order, überzählige fallen hinten weg.
-function rolesFor(n, options = {}) {
+// Rollen vor dem Auffüllen: pro Rolle `defaultCount(n)`, Host-Override via options.roles.
+function rawRoles(n, options = {}) {
   const overrides = options.roles || {};
   const roles = [];
   for (const role of allRoles()) {
@@ -43,6 +42,13 @@ function rolesFor(n, options = {}) {
     const count = o === undefined ? (role.defaultCount?.(n, options) ?? 0) : Number(o);
     for (let i = 0; i < count; i++) roles.push(role.id);
   }
+  return roles;
+}
+
+// Endgültige Zusammenstellung: Rollen mit `fill` (Dorfbewohner) füllen auf,
+// Reihenfolge = Rolle.order, überzählige fallen hinten weg.
+function rolesFor(n, options = {}) {
+  const roles = rawRoles(n, options);
   const filler = allRoles().find((r) => r.fill);
   if (!filler) fail('Keine Füllrolle registriert.');
   while (roles.length < n) roles.push(filler.id);
@@ -419,6 +425,6 @@ function publicView(s) {
 
 module.exports = {
   PHASE, TEAMS, TEAM_INFO, rolesOfTeam, MIN_PLAYERS, MAX_PLAYERS,
-  createGame, rolesFor, nightAction, deathAction, startVote, vote, forceAdvance,
+  createGame, rawRoles, rolesFor, nightAction, deathAction, startVote, vote, forceAdvance,
   nightTargets, deathTargets, waitingFor, roleInfo, publicView, checkWin, shuffle,
 };

@@ -250,3 +250,16 @@ test('1000 Zufallsspiele terminieren (mit Narr)', () => {
     assert.ok(s.winner);
   }
 });
+
+const { describeSetup, selectableRoles } = require('../src/games/werewolf/setup');
+
+test('describeSetup: Vorschau, Warnungen und Fehler', () => {
+  const ok = describeSetup(10, {});
+  assert.strictEqual(ok.errors.length, 0);
+  assert.ok(ok.text.includes('Werwolf'));
+  assert.ok(describeSetup(8, { roles: { werewolf: 0 } }).errors.length > 0);
+  assert.ok(describeSetup(6, { roles: { werewolf: 3 } }).errors.length > 0);
+  assert.ok(describeSetup(5, { roles: { seer: 1, doctor: 1, witch: 1, hunter: 1, jester: 1 } }).warnings.length > 0);
+  assert.ok(describeSetup(4, {}).errors.length > 0);
+  assert.ok(selectableRoles().every((r) => !r.fill && r.team !== TEAMS.WOLVES));
+});
