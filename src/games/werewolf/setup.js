@@ -32,9 +32,9 @@ function describeSetup(n, options = {}) {
   return { counts, groups, errors, warnings, text };
 }
 
-// Rollen, die der Host im Optionen-Menü an-/abwählen kann (ohne Füllrolle und Werwolf: eigene Zahl).
+// Rollen, die der Host im Optionen-Menü an-/abwählen kann (ohne Füllrolle und Rollen mit eigener Zahl, z. B. Werwolf).
 function selectableRoles() {
-  return allRoles().filter((r) => !r.fill && r.team !== TEAMS.WOLVES);
+  return allRoles().filter((r) => !r.fill && !r.ownCountOption);
 }
 
 module.exports = { describeSetup, selectableRoles };

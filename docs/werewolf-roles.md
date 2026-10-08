@@ -22,12 +22,17 @@ Wolfs-Mehrheit als "andere" und verhindern das Dorf-Ende nicht.
 - `defaultCount(n, options)`: Anzahl bei n Spielern; Host überschreibt per `options.roles = { id: Anzahl|false }`. `fill: true` = Füllrolle (Dorfbewohner).
 - `seenAs: 'wolf'`: Seher sieht die Rolle als Werwolf. `knowsTeam: true`: kennt Teammitglieder.
 - `night`: `normalize` (Eingabe prüfen, Pflicht), `targets`, `canAct`, `needs` (erst nach anderen Rollen), `revisable`, `onOpen`, `onSubmit` (private Events), `onDone`, `resolveOrder` + `resolve(s, ns, ctx)` (`ctx.attacks.push({id, cause, blockable})`, `ctx.protected.add(id)`), `ui` (Hinweis für die Discord-Oberfläche).
+- `night: { group: '<rolleId>' }`: nimmt an der gemeinsamen Nachtaktion der Gruppen-Rolle teil (Alphawolf stimmt mit dem Rudel ab, `packWeight: 2`).
 - `deathTrigger`: Aktion beim Tod (`targets`, `resolve` → zusätzliche Tode), z. B. Jäger.
 - `initState(s)`: Rollen-Zustand in `s.roleState[id]` (Tränke, letzter Schutz). Muss JSON-serialisierbar bleiben.
-- `onDeath(s, player, cause)` → `{ winner, reason, playerIds }` für Sondersiege, `checkWin(s)` für globale Zusatzbedingungen.
+- `resolveNight(s, ns, ctx)` (+ `resolveOrder`): Auflösung auch ohne eigene Nachtaktion, `ctx.visits` = alle Nachtziele (Granny erschießt Besucher), `ctx.immune`, `ctx.conversions` (Rollenwechsel → privates Event `role_change`).
+- `voteWeight`, `packWeight`, `replaces`, `ownCountOption`, `allies`, `hostile`, `extraInfo`: siehe Vorlage.
+- `onPlayerDeath(s, dead, cause)`: reagiert auf jeden Tod (Lyncher). `onDeath(s, player, cause)` → `{ winner, reason, playerIds }` für Sondersiege, `checkWin(s)` für globale Zusatzbedingungen.
 
 ## Vorhandene Rollen
-Dorf: Dorfbewohner, Seherin, Doktor, Hexe, Jäger · Werwölfe: Werwolf · Neutral: Narr (standardmäßig aus).
+Dorf: Dorfbewohner, Seherin, Doktor, Hexe, Jäger, Bürgermeister (Lynch-Stimme ×2, verdeckt), Granny (erschießt jeden nächtlichen Besucher, Angriffe auf sie scheitern) ·
+Werwölfe: Werwolf, Alphawolf (Rudelstimme ×2, ersetzt einen Werwolf) ·
+Neutral: Narr, Vampir (beißt nachts gemeinsam, Gebissene werden Vampire, Sieg bei ≥ Hälfte; Wölfe immun, Schutz verhindert Biss; Dorf gewinnt erst ohne Vampire), Lyncher (geheimes Dorf-Ziel, gewinnt allein wenn es gelyncht wird, sonst wird er Dorfbewohner) – Narr, Vampir und Lyncher sind standardmäßig aus.
 
 ## Regeln für Rollen-Code
 - Zustand nur in `s.roleState[id]` oder `ns.data/ns.shared` – keine Funktionen/Objekte mit Methoden im State (Persistenz!).

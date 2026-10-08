@@ -8,7 +8,7 @@ const PHASES = {
   DEATH_TRIGGER: ['⚡', 'Letzte Aktion'],
   GAME_OVER: ['🏁', 'Spiel beendet'],
 };
-const CAUSES = { wolves: '🐺 gerissen', witch: '☠️ vergiftet', hunter: '🏹 erschossen', lynch: '⚖️ gelyncht' };
+const CAUSES = { wolves: '🐺 gerissen', witch: '☠️ vergiftet', hunter: '🏹 erschossen', granny: '👵 von Granny erschossen', lynch: '⚖️ gelyncht' };
 const TEAM_NAMES = { village: 'Das Dorf', wolves: 'Die Werwölfe', neutral: 'Eine neutrale Rolle' };
 
 const LAYOUT = `
