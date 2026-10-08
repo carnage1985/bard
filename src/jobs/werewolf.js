@@ -242,12 +242,13 @@ module.exports = (client, logger = console) => {
     const role = getRole(me.role);
 
     if (s.phase === PHASE.NIGHT && role.night && W.waitingFor(s).includes(userId)) {
-      const kind = role.night.ui?.kind || 'target';
+      const unit = getRole(role.night.group || role.id); // Gruppen-Rolle liefert UI/Regeln (z. B. Alphawolf → Werwolf)
+      const kind = unit.night.ui?.kind || 'target';
       if (kind === 'potions') return witchPrompt(game, userId);
-      const current = s.nightState.data[role.id]?.[userId]?.targetId;
+      const current = s.nightState.data[unit.id]?.[userId]?.targetId;
       const targets = W.nightTargets(s, userId);
       return {
-        content: `${role.emoji} **${role.name}** – ${role.night.ui?.prompt || 'Wähle ein Ziel.'}${current ? `\nAktuell: **${nameOf(game, current)}**` : ''}`,
+        content: `${role.emoji} **${role.name}** – ${unit.night.ui?.prompt || 'Wähle ein Ziel.'}${current ? `\nAktuell: **${nameOf(game, current)}**` : ''}`,
         components: [row(playerSelect(`${TYPE}:na:${g}`, 'Ziel wählen', targets))],
       };
     }
@@ -297,7 +298,8 @@ module.exports = (client, logger = console) => {
       `Deine Rolle: ${info.emoji} **${info.name}** (${info.teamEmoji} ${info.teamName})`,
       info.description,
     ];
-    if (info.teammates.length) lines.push(`Deine Teammitglieder: ${info.teammates.map((t) => `**${t.name}**`).join(', ')}`);
+    if (info.teammates.length) lines.push(`Deine Verbündeten: ${info.teammates.map((t) => `**${t.name}**`).join(', ')}`);
+    lines.push(...(info.extra || []));
     lines.push('', '🤫 Zeig diese Nachricht niemandem.');
     return lines.join('\n');
   }
@@ -368,7 +370,7 @@ module.exports = (client, logger = console) => {
 
   const deathLine = (game, d) => {
     const role = d.role ? getRole(d.role) : null;
-    const how = { wolves: 'wurde von den Wölfen gerissen', witch: 'wurde vergiftet', hunter: 'wurde erschossen', lynch: 'wurde gelyncht' }[d.cause] || 'ist gestorben';
+    const how = { wolves: 'wurde von den Wölfen gerissen', witch: 'wurde vergiftet', granny: 'wurde von der paranoiden Granny erschossen', hunter: 'wurde erschossen', lynch: 'wurde gelyncht' }[d.cause] || 'ist gestorben';
     return `💀 **${nameOf(game, d.id)}** ${how}${role ? ` – ${role.emoji} ${role.name}` : ''}`;
   };
 
@@ -383,6 +385,9 @@ module.exports = (client, logger = console) => {
         break;
       case 'wolves_decided':
         await threadSay(game, `🐺 Das Rudel hat entschieden: **${ev.victimId ? nameOf(game, ev.victimId) : 'niemand'}**.`);
+        break;
+      case 'role_change':
+        await dm(ev.to, { content: `⚠️ **Deine Rolle hat sich geändert!**\n${roleText(game, ev.to)}` });
         break;
       case 'seer_result':
         await deliverPrivate(ev.to, `🔮 **${nameOf(game, ev.targetId)}** ist ${ev.isWolf ? '🐺 **ein Werwolf**' : '🧑‍🌾 **kein Werwolf**'}.`, null);
@@ -562,7 +567,7 @@ module.exports = (client, logger = console) => {
       const { allRoles } = require('../games/werewolf/roles');
       const byTeam = ['village', 'wolves', 'neutral'].map((t) => {
         const rs = allRoles().filter((r) => r.team === t);
-        return rs.length ? `${TEAM_INFO[t].emoji} **${TEAM_INFO[t].name}**\n${rs.map((r) => `${r.emoji} **${r.name}** – ${r.description || ''}`).join('\n')}` : '';
+        return rs.length ? `${TEAM_INFO[t].emoji} **${TEAM_INFO[t].name}**\n${rs.map((r) => `${r.emoji} **${r.name}** – ${(r.description || '').split(/(?<=[.!?])\s/)[0]}`).join('\n')}` : '';
       }).filter(Boolean);
       return interaction.reply({
         flags: EPHEMERAL,
@@ -655,7 +660,8 @@ module.exports = (client, logger = console) => {
       try {
         switch (action) {
           case 'na': {
-            const role = getRole(s.players.find((p) => p.id === uid)?.role || 'villager');
+            const own = getRole(s.players.find((p) => p.id === uid)?.role || 'villager');
+            const role = getRole(own.night?.group || own.id);
             events = W.nightAction(s, uid, { targetId: interaction.values[0] });
             done = `✅ Gewählt: **${nameOf(game, interaction.values[0])}**.`;
             if (role.night?.revisable) { // Rudel darf bis zum Ende ändern: Menü bleibt

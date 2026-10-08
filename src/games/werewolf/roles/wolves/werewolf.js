@@ -1,4 +1,4 @@
-const { TEAMS, teamOf } = require('../../teams');
+const { TEAMS, roleOf, teamOf } = require('../../teams');
 
 module.exports = {
   id: 'werewolf',
@@ -9,6 +9,7 @@ module.exports = {
   order: 10,
   seenAs: 'wolf',
   knowsTeam: true,
+  ownCountOption: true, // eigene Anzahl-Auswahl in den Lobby-Optionen
   defaultCount: (n) => Math.max(1, Math.round(n / 4)),
   night: {
     revisable: true, // Rudel kann sich bis zum Ende umentscheiden
@@ -22,13 +23,17 @@ module.exports = {
     },
     onDone(s, ns, events, rng) {
       const tally = {};
-      for (const d of Object.values(ns.data.werewolf || {})) if (d.targetId) tally[d.targetId] = (tally[d.targetId] || 0) + 1;
+      for (const [actorId, d] of Object.entries(ns.data.werewolf || {})) {
+        if (!d.targetId) continue;
+        const voter = s.players.find((p) => p.id === actorId);
+        tally[d.targetId] = (tally[d.targetId] || 0) + (roleOf(voter.role).packWeight ?? 1); // z. B. Alphawolf ×2
+      }
       const max = Math.max(0, ...Object.values(tally));
       const top = Object.keys(tally).filter((id) => tally[id] === max);
       ns.shared.victimId = max ? top[top.length === 1 ? 0 : Math.floor(rng() * top.length)] : null;
       events.push({
         type: 'wolves_decided', victimId: ns.shared.victimId,
-        wolfIds: s.players.filter((p) => p.alive && p.role === 'werewolf').map((p) => p.id),
+        wolfIds: s.players.filter((p) => p.alive && teamOf(p) === TEAMS.WOLVES).map((p) => p.id),
       });
     },
     resolve(s, ns, ctx) {

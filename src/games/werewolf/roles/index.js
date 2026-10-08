@@ -14,7 +14,8 @@ function validate(def) {
   if (!Object.values(TEAMS).includes(def.team)) throw new Error(`${where}: ungültiges team`);
   if (def.night) {
     const n = def.night;
-    if (typeof n.normalize !== 'function') throw new Error(`${where}: night.normalize fehlt`);
+    if (n.group !== undefined && typeof n.group !== 'string') throw new Error(`${where}: night.group muss eine Rollen-ID sein`);
+    if (n.group === undefined && typeof n.normalize !== 'function') throw new Error(`${where}: night.normalize fehlt`);
     if (n.needs && !Array.isArray(n.needs)) throw new Error(`${where}: night.needs muss ein Array sein`);
   }
   if (def.deathTrigger && typeof def.deathTrigger.resolve !== 'function') {

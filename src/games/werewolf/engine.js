@@ -42,6 +42,14 @@ function rawRoles(n, options = {}) {
     const count = o === undefined ? (role.defaultCount?.(n, options) ?? 0) : Number(o);
     for (let i = 0; i < count; i++) roles.push(role.id);
   }
+  // `replaces`: Rolle verdrängt eine andere der Zusammenstellung (z. B. Alphawolf ersetzt einen Werwolf).
+  for (const role of allRoles()) {
+    if (!role.replaces) continue;
+    for (let i = roles.filter((id) => id === role.id).length; i > 0; i--) {
+      const idx = roles.indexOf(role.replaces);
+      if (idx >= 0) roles.splice(idx, 1);
+    }
+  }
   return roles;
 }
 
@@ -76,6 +84,7 @@ function createGame({ code, hostId, players, rng = Math.random, options = {} }) 
     roleState: {}, // rollenspezifischer Zustand (Tränke, letzter Schutz, …)
     nightState: null,
     votes: {},
+    notices: [], // Events aus Rollen-Hooks (z. B. role_change), werden beim Weiterlauf ausgegeben
     triggerQueue: [],
     pendingTriggerId: null,
     pendingWin: null,
@@ -85,7 +94,7 @@ function createGame({ code, hostId, players, rng = Math.random, options = {} }) 
     winReason: null,
     log: [],
   };
-  for (const role of allRoles()) if (role.initState) state.roleState[role.id] = role.initState(state);
+  for (const role of allRoles()) if (role.initState) state.roleState[role.id] = role.initState(state, rng);
   startNight(state, []);
   return state;
 }
@@ -109,7 +118,8 @@ function checkWin(s) {
   }
   const a = alive(s);
   const wolves = a.filter((p) => teamOf(p) === TEAMS.WOLVES).length;
-  if (wolves === 0) return { winner: TEAMS.VILLAGE, reason: 'Alle Werwölfe sind tot' };
+  const hostile = a.some((p) => roleOf(p).hostile); // z. B. Vampire: das Dorf muss sie auch besiegen
+  if (wolves === 0 && !hostile) return { winner: TEAMS.VILLAGE, reason: 'Alle Werwölfe sind tot' };
   if (wolves >= a.length - wolves) return { winner: TEAMS.WOLVES, reason: 'Die Werwölfe haben das Dorf überrannt' };
   return null;
 }
@@ -124,6 +134,15 @@ function endGame(s, win, events) {
   events.push({ type: 'game_over', winner: win.winner, reason: win.reason, playerIds: s.winnerIds });
 }
 
+// Rollenwechsel (Biss, Wegfall des Ziels …); der Spieler erfährt es per privatem Event `role_change`.
+function convert(s, id, roleId) {
+  const p = byId(s, id);
+  if (!p || !p.alive || p.role === roleId) return;
+  const from = p.role;
+  p.role = roleId;
+  (s.notices ||= []).push({ type: 'role_change', to: id, roleId, from });
+}
+
 function kill(s, id, cause) {
   const p = byId(s, id);
   if (!p || !p.alive) return null;
@@ -131,6 +150,13 @@ function kill(s, id, cause) {
   p.deathCause = cause;
   const win = roleOf(p).onDeath?.(s, p, cause);
   if (win && !s.pendingWin) s.pendingWin = win; // Sondersieg (z. B. Narr), gilt nach Abschluss der Tod-Aktionen
+  // Globaler Hook: jede Rolle darf auf jeden Tod reagieren (z. B. Lyncher: Ziel gelyncht).
+  for (const role of allRoles()) {
+    const r = role.onPlayerDeath?.(s, p, cause);
+    if (!r) continue;
+    if (r.win && !s.pendingWin) s.pendingWin = r.win;
+    for (const c of r.convert || []) convert(s, c.id, c.roleId);
+  }
   return p;
 }
 
@@ -147,20 +173,27 @@ function startNight(s, events) {
   events.push({ type: 'night_start', night: s.night });
 }
 
-// Rollen mit Nachtaktion, von denen mindestens ein lebender Spieler im Spiel ist.
+// Nachtgruppen: Rollen mit `night.group` stimmen gemeinsam mit der Gruppen-Rolle ab (z. B. Alphawolf → werewolf).
+const groupId = (role) => role.night?.group || role.id;
+const unitOf = (role) => getRole(groupId(role));
+
+// Nachtaktions-Einheiten (Gruppen-Rollen), von denen mindestens ein lebender Spieler im Spiel ist.
 function nightRoles(s) {
-  const present = new Set(alive(s).map((p) => p.role));
-  return allRoles().filter((r) => r.night && present.has(r.id));
+  const ids = new Set(alive(s).filter((p) => roleOf(p).night).map((p) => groupId(roleOf(p))));
+  return allRoles().filter((r) => r.night && !r.night.group && ids.has(r.id));
 }
 
-function actorsOf(s, role) {
-  return alive(s).filter((p) => p.role === role.id && (role.night.canAct ? role.night.canAct(s, p) : true));
+function actorsOf(s, unit) {
+  return alive(s).filter((p) => {
+    const r = roleOf(p);
+    return r.night && groupId(r) === unit.id && (unit.night.canAct ? unit.night.canAct(s, p) : true);
+  });
 }
 
-// Rolle ist "fertig", wenn niemand mehr von ihr aktiv ist oder alle Akteure abgegeben haben.
+// Einheit ist "fertig", wenn niemand mehr von ihr aktiv ist oder alle Akteure abgegeben haben.
 function roleDone(s, ns, roleId) {
-  const role = getRole(roleId);
-  if (!role.night || !alive(s).some((p) => p.role === roleId)) return true;
+  const unit = getRole(roleId);
+  if (!unit.night || !alive(s).some((p) => roleOf(p).night && groupId(roleOf(p)) === roleId)) return true;
   return !!ns.done[roleId];
 }
 
@@ -194,8 +227,8 @@ function nightAction(s, actorId, input = {}, rng = Math.random) {
   if (s.phase !== PHASE.NIGHT) fail('Gerade ist nicht Nacht.');
   const actor = byId(s, actorId);
   if (!actor || !actor.alive) fail('Du hast jetzt keine Aktion.');
-  const role = roleOf(actor);
-  if (!role.night) fail('Du hast nachts keine Aktion.');
+  if (!roleOf(actor).night) fail('Du hast nachts keine Aktion.');
+  const role = unitOf(roleOf(actor)); // Gruppen-Rolle liefert Regeln und Hooks
   const ns = s.nightState;
   if (!needsMet(s, ns, role)) fail('Du bist noch nicht dran.');
   if (ns.done[role.id]) fail('Du hast dich schon entschieden.');
@@ -211,20 +244,43 @@ function nightAction(s, actorId, input = {}, rng = Math.random) {
   return events;
 }
 
+// Alle Nachtziele (targetId / poisonId) – Grundlage für "Besucher"-Regeln (z. B. Granny).
+function collectVisits(ns) {
+  const visits = [];
+  for (const [roleId, entries] of Object.entries(ns.data)) {
+    for (const [actorId, d] of Object.entries(entries)) {
+      if (d.targetId) visits.push({ actorId, targetId: d.targetId, roleId });
+      if (d.poisonId) visits.push({ actorId, targetId: d.poisonId, roleId });
+    }
+  }
+  return visits;
+}
+
 function resolveNight(s, events) {
   const ns = s.nightState;
-  const ctx = { attacks: [], protected: new Set() };
-  const order = (r) => r.night.resolveOrder ?? 50;
-  for (const role of allRoles().filter((r) => r.night).sort((a, b) => order(a) - order(b))) {
-    role.night.resolve?.(s, ns, ctx);
+  const ctx = {
+    attacks: [], // { id, cause, blockable }
+    protected: new Set(), // Schutz vor blockierbaren Angriffen und Bissen
+    immune: new Set(), // Angriffe/Bisse auf diese Spieler entfallen ganz
+    conversions: [], // { id, roleId } – Rollenwechsel für Überlebende
+    visits: collectVisits(ns),
+  };
+  const hooks = [];
+  for (const role of allRoles()) {
+    if (role.night?.resolve) hooks.push({ order: role.night.resolveOrder ?? 50, run: () => role.night.resolve(s, ns, ctx) });
+    if (role.resolveNight) hooks.push({ order: role.resolveOrder ?? 50, run: () => role.resolveNight(s, ns, ctx) });
   }
+  for (const h of hooks.sort((a, b) => a.order - b.order)) h.run();
+
   const deaths = [];
   for (const atk of ctx.attacks) {
+    if (ctx.immune.has(atk.id)) continue;
     if (atk.blockable && ctx.protected.has(atk.id)) continue;
     if (deaths.some((d) => d.id === atk.id)) continue;
     const p = kill(s, atk.id, atk.cause);
     if (p) deaths.push({ id: p.id, cause: atk.cause });
   }
+  for (const c of ctx.conversions) if (!ctx.immune.has(c.id)) convert(s, c.id, c.roleId);
   s.nightState = null;
   s.day += 1;
   log(s, 'dawn', { deaths });
@@ -235,6 +291,7 @@ function resolveNight(s, events) {
 // ---------- Tod-Aktionen / Weiterlauf ----------
 
 function afterDeaths(s, deadIds, next, events) {
+  events.push(...(s.notices || []).splice(0));
   s.next = next;
   for (const id of deadIds) {
     const p = byId(s, id);
@@ -255,6 +312,7 @@ function nextTrigger(s, events) {
 }
 
 function proceed(s, events) {
+  events.push(...(s.notices || []).splice(0));
   const next = s.next;
   s.pendingTriggerId = null;
   s.next = null;
@@ -312,7 +370,11 @@ function vote(s, actorId, targetId) {
 
 function resolveVote(s, events) {
   const tally = {};
-  for (const t of Object.values(s.votes)) if (t) tally[t] = (tally[t] || 0) + 1;
+  for (const [voterId, t] of Object.entries(s.votes)) {
+    if (!t) continue;
+    const voter = byId(s, voterId);
+    tally[t] = (tally[t] || 0) + (roleOf(voter).voteWeight?.(s, voter) ?? 1); // z. B. Bürgermeister ×2
+  }
   const max = Math.max(0, ...Object.values(tally));
   const top = Object.keys(tally).filter((id) => tally[id] === max);
   const lynchedId = max > 0 && top.length === 1 ? top[0] : null; // Gleichstand/keine Stimmen: niemand
@@ -376,7 +438,7 @@ function waitingFor(s) {
 // Erlaubte Ziele einer Nachtaktion für den Akteur (für UI-Auswahl).
 function nightTargets(s, actorId) {
   const actor = byId(s, actorId);
-  return roleOf(actor).night?.targets?.(s, actor) || [];
+  return roleOf(actor).night ? (unitOf(roleOf(actor)).night.targets?.(s, actor) || []) : [];
 }
 
 function deathTargets(s, actorId) {
@@ -388,12 +450,14 @@ function deathTargets(s, actorId) {
 function roleInfo(s, id) {
   const me = byId(s, id);
   const role = roleOf(me);
-  const teammates = role.knowsTeam
-    ? s.players.filter((p) => p.id !== id && teamOf(p) === role.team).map((p) => ({ id: p.id, name: p.name }))
-    : [];
+  const allies = role.allies
+    ? role.allies(s, me)
+    : (role.knowsTeam ? s.players.filter((p) => p.id !== id && teamOf(p) === role.team) : []);
+  const teammates = allies.map((p) => ({ id: p.id, name: p.name }));
   return {
     role: me.role, name: role.name, emoji: role.emoji, description: role.description,
     team: role.team, teamName: TEAM_INFO[role.team].name, teamEmoji: TEAM_INFO[role.team].emoji, teammates,
+    extra: role.extraInfo?.(s, me) || [], // Zusatzzeilen für die Rollen-DM (z. B. Ziel des Lynchers)
   };
 }
 
