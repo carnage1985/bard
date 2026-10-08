@@ -8,7 +8,7 @@ Gespielt wird im Discord-Sprachkanal, Aktionen laufen über Buttons/Auswahlmenü
 ```
 src/games/core/        gemeinsamer Kern: store.js (games.json, Migration von secretHitler.json),
                        sessions.js (ein Spiel pro Server, Feld `type`), messenger.js (say/dm/
-                       deliverPrivate/setMute, Button-/Select-Builder), lobby.js (Voice-Übernahme, join/leave/begin)
+                       deliverPrivate/setMute, Button-/Select-Builder), lobby.js (nur Host automatisch in der Lobby, join/leave/begin)
 src/games/secretHitler/engine.js   reine Engine (5–10 Spieler)
 src/games/werewolf/    engine.js (reine Engine, 5–16 Spieler), setup.js (Rollen-Vorschau/Validierung),
                        teams.js, roles/ (siehe unten)

@@ -1,17 +1,10 @@
-// Gemeinsame Lobby: Spieler aus dem Voice-Channel übernehmen, Beitreten/Verlassen/Starten.
+// Gemeinsame Lobby: Host automatisch dabei, Beitreten/Verlassen/Starten.
 const { EmbedBuilder, ButtonStyle } = require('discord.js');
 const { row, btn } = require('./messenger');
 
-// Host + alle Nicht-Bots im Sprachkanal des Hosts (bis max Spieler).
-function collectLobby(interaction, max) {
-  const voice = interaction.member?.voice?.channel;
-  const lobby = [{ id: interaction.user.id, name: interaction.member.displayName }];
-  if (voice) {
-    for (const m of voice.members.values()) {
-      if (!m.user.bot && m.id !== interaction.user.id && lobby.length < max) lobby.push({ id: m.id, name: m.displayName });
-    }
-  }
-  return { lobby, fromVoice: !!voice };
+// Nur der Host ist automatisch dabei; alle anderen treten per „Beitreten“-Button bei.
+function collectLobby(interaction) {
+  return { lobby: [{ id: interaction.user.id, name: interaction.member?.displayName || interaction.user.username }] };
 }
 
 // `prefix` = customId-Präfix des Spiels (z. B. "sh"), Buttons: <prefix>:join|leave|begin

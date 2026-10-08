@@ -16,7 +16,7 @@ const LOBBY_LIMITS = { min: E.MIN_PLAYERS, max: E.MAX_PLAYERS };
 const command = new SlashCommandBuilder()
   .setName('sh')
   .setDescription('Secret Hitler spielen.')
-  .addSubcommand((s) => s.setName('start').setDescription('Neue Lobby öffnen (Spieler aus deinem Sprachkanal werden übernommen).'))
+  .addSubcommand((s) => s.setName('start').setDescription('Neue Lobby öffnen (du bist Host, andere treten per Button bei).'))
   .addSubcommand((s) => s.setName('status').setDescription('Zeigt den aktuellen Spielstand.'))
   .addSubcommand((s) => s.setName('abbrechen').setDescription('Laufendes Spiel abbrechen (Host oder Manage Server).'))
   .addSubcommand((s) => s.setName('regeln').setDescription('Kurzregeln und Lizenzhinweis.'));
@@ -367,7 +367,7 @@ module.exports = (client, logger = console) => {
     // start
     if (game) return interaction.reply({ content: '❌ Auf diesem Server läuft bereits ein Spiel (`/sh status`).', flags: EPHEMERAL });
     await interaction.deferReply({ flags: EPHEMERAL });
-    const { lobby, fromVoice: voice } = collectLobby(interaction, E.MAX_PLAYERS);
+    const { lobby } = collectLobby(interaction);
     const g = {
       type: TYPE, guildId: gid, channelId: interaction.channelId, hostId: interaction.user.id,
       code: crypto.randomBytes(6).toString('hex'), lobby, state: null,
@@ -378,9 +378,7 @@ module.exports = (client, logger = console) => {
     const msg = await say(g, lobbyPayload(g));
     g.lobbyMsgId = msg?.id || null;
     sync(g);
-    await interaction.editReply(voice
-      ? `✅ Lobby geöffnet, ${lobby.length} Spieler aus deinem Sprachkanal übernommen.`
-      : '✅ Lobby geöffnet. Tipp: Starte aus einem Sprachkanal, dann werden alle dort übernommen.');
+    await interaction.editReply('✅ Lobby geöffnet. Alle anderen treten über „Beitreten“ bei.');
   }
 
   async function handleComponent(interaction) {
