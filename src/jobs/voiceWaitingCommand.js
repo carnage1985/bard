@@ -4,6 +4,9 @@ const {
   setWaitingChannel,
   removeWaitingChannel,
   listWaitingChannels,
+  getPingRole,
+  setPingRole,
+  clearPingRole,
 } = require('../utils/voiceWaitingStore');
 
 const command = new SlashCommandBuilder()
@@ -23,7 +26,26 @@ const command = new SlashCommandBuilder()
   .addSubcommand(sub => sub
     .setName('list')
     .setDescription('Zeigt alle konfigurierten Voice-Channels.')
+  )
+  .addSubcommand(sub => sub
+    .setName('setrole')
+    .setDescription('Legt die Rolle fest, die beim Alleine-Ping erwähnt wird (statt @here).')
+    .addRoleOption(opt => opt.setName('role').setDescription('Ping-Rolle').setRequired(true))
+  )
+  .addSubcommand(sub => sub
+    .setName('clearrole')
+    .setDescription('Entfernt die Ping-Rolle, es wird wieder @here verwendet.')
+  )
+  .addSubcommand(sub => sub
+    .setName('anmelden')
+    .setDescription('Du bekommst die Ping-Rolle und wirst bei Alleine-Pings benachrichtigt.')
+  )
+  .addSubcommand(sub => sub
+    .setName('abmelden')
+    .setDescription('Du verlierst die Ping-Rolle und wirst nicht mehr bei Alleine-Pings benachrichtigt.')
   );
+
+const SELF_SERVICE = ['anmelden', 'abmelden'];
 
 function hasPermission(member) {
   return member.permissions.has(PermissionsBitField.Flags.ManageChannels)
@@ -37,7 +59,10 @@ function formatList(guildId, logger) {
     const notifyChannel = entry?.notifyChannelId ? `<#${entry.notifyChannelId}>` : '*(unbekannt)*';
     return `• <#${channelId}> → Ping nach **${waitMinutes}** Min. alleine → Benachrichtigung in ${notifyChannel}`;
   });
-  return lines.length ? lines.join('\n') : 'ℹ️ Keine Voice-Channels für den Alleine-Ping konfiguriert.';
+  const roleId = getPingRole(guildId, logger);
+  if (!lines.length) lines.push('ℹ️ Keine Voice-Channels für den Alleine-Ping konfiguriert.');
+  lines.push(roleId ? `🔔 Ping-Rolle: <@&${roleId}>` : '🔔 Ping-Rolle: *(keine – es wird `@here` verwendet)*');
+  return lines.join('\n');
 }
 
 module.exports = (client, logger = console) => {
@@ -46,13 +71,50 @@ module.exports = (client, logger = console) => {
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'voicewait') return;
 
-    if (!hasPermission(interaction.member)) {
+    const sub = interaction.options.getSubcommand();
+
+    if (!SELF_SERVICE.includes(sub) && !hasPermission(interaction.member)) {
       await interaction.reply({ content: '❌ Du brauchst das Recht **Manage Channels** oder **Manage Server**, um das zu nutzen.', flags: MessageFlags.Ephemeral });
       return;
     }
 
-    const sub = interaction.options.getSubcommand();
     try {
+      if (SELF_SERVICE.includes(sub)) {
+        const roleId = getPingRole(interaction.guildId, logger);
+        if (!roleId) {
+          await interaction.reply({ content: 'ℹ️ Es ist keine Ping-Rolle eingerichtet – der Alleine-Ping nutzt `@here`.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+        try {
+          if (sub === 'anmelden') await interaction.member.roles.add(roleId);
+          else await interaction.member.roles.remove(roleId);
+        } catch (err) {
+          logger.error('❌ Voice-Wait: Rolle konnte nicht geändert werden:', err);
+          await interaction.reply({ content: '❌ Ich kann die Rolle nicht vergeben. Der Bot braucht **Rollen verwalten** und seine Rolle muss über der Ping-Rolle stehen.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+        await interaction.reply({
+          content: sub === 'anmelden' ? `✅ Du hast jetzt <@&${roleId}> und wirst bei Alleine-Pings benachrichtigt.` : `✅ Du hast <@&${roleId}> abgegeben und wirst nicht mehr benachrichtigt.`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
+
+      if (sub === 'setrole') {
+        const role = interaction.options.getRole('role');
+        setPingRole(interaction.guildId, role.id, logger);
+        logger.info(`📝 Voice-Wait Ping-Rolle gesetzt: guild=${interaction.guildId} role=${role.id}`);
+        await interaction.reply({ content: `✅ Alleine-Pings erwähnen jetzt <@&${role.id}>. Mitglieder holen sie sich mit \`/voicewait anmelden\`.`, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+        return;
+      }
+
+      if (sub === 'clearrole') {
+        const removed = clearPingRole(interaction.guildId, logger);
+        await interaction.reply({ content: removed ? '✅ Ping-Rolle entfernt, es wird wieder `@here` verwendet.' : 'ℹ️ Es war keine Ping-Rolle eingerichtet.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
       if (sub === 'set') {
         const channel = interaction.options.getChannel('channel');
         const waitMinutes = interaction.options.getInteger('minutes');

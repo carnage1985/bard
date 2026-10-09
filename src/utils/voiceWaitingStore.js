@@ -98,8 +98,33 @@ function listWaitingChannels(guildId, logger) {
   return config?.[guildId] ?? {};
 }
 
+// Ping-Rolle pro Server (Schlüssel `__pingRoles`, kollidiert nicht mit Guild-IDs)
+function getPingRole(guildId, logger) {
+  ensureLoaded(logger);
+  return config?.__pingRoles?.[guildId] ?? null;
+}
+
+function setPingRole(guildId, roleId, logger) {
+  ensureLoaded(logger);
+  if (!config.__pingRoles) config.__pingRoles = {};
+  config.__pingRoles[guildId] = roleId;
+  persist(logger);
+}
+
+function clearPingRole(guildId, logger) {
+  ensureLoaded(logger);
+  if (!config.__pingRoles?.[guildId]) return false;
+  delete config.__pingRoles[guildId];
+  if (!Object.keys(config.__pingRoles).length) delete config.__pingRoles;
+  persist(logger);
+  return true;
+}
+
 module.exports = {
   CONFIG_PATH,
+  getPingRole,
+  setPingRole,
+  clearPingRole,
   watchConfig,
   setWaitingChannel,
   removeWaitingChannel,
