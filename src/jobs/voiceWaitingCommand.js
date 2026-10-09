@@ -7,6 +7,7 @@ const {
   getPingRole,
   setPingRole,
   clearPingRole,
+  setNeverPing,
 } = require('../utils/voiceWaitingStore');
 
 const command = new SlashCommandBuilder()
@@ -43,9 +44,13 @@ const command = new SlashCommandBuilder()
   .addSubcommand(sub => sub
     .setName('abmelden')
     .setDescription('Du verlierst die Ping-Rolle und wirst nicht mehr bei Alleine-Pings benachrichtigt.')
+  )
+  .addSubcommand(sub => sub
+    .setName('wiederfragen')
+    .setDescription('Hebt „Nie pingen“ auf: Der Bot fragt dich wieder, wenn du alleine im Sprachkanal bist.')
   );
 
-const SELF_SERVICE = ['anmelden', 'abmelden'];
+const SELF_SERVICE = ['anmelden', 'abmelden', 'wiederfragen'];
 
 function hasPermission(member) {
   return member.permissions.has(PermissionsBitField.Flags.ManageChannels)
@@ -79,6 +84,12 @@ module.exports = (client, logger = console) => {
     }
 
     try {
+      if (sub === 'wiederfragen') {
+        setNeverPing(interaction.guildId, interaction.user.id, false, logger);
+        await interaction.reply({ content: '✅ Der Bot fragt dich wieder, bevor ein Alleine-Ping rausgeht.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
       if (SELF_SERVICE.includes(sub)) {
         const roleId = getPingRole(interaction.guildId, logger);
         if (!roleId) {

@@ -1,5 +1,5 @@
 const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { watchConfig, listWaitingChannels, getPingRole } = require('../utils/voiceWaitingStore');
+const { watchConfig, listWaitingChannels, getPingRole, isNeverPing, setNeverPing } = require('../utils/voiceWaitingStore');
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const CONFIRM_TIMEOUT_MS = 30 * 1000;
@@ -73,10 +73,11 @@ module.exports = (client, logger = console) => {
     let dm;
     try {
       dm = await member.send({
-        content: `🎮 Du bist seit **${waitMinutes}** Min. alleine in **${voiceChannel.name}**. Soll ich die anderen anpingen? Ohne Antwort pinge ich in 30 Sekunden automatisch.`,
+        content: `🎮 Du bist seit **${waitMinutes}** Min. alleine in **${voiceChannel.name}**. Soll ich die anderen anpingen? Ohne Antwort pinge ich in 30 Sekunden automatisch. („Nie pingen“ gilt dauerhaft, rückgängig mit `/voicewait wiederfragen`.)`,
         components: [new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('vw:ping').setLabel('Ping auslösen').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId('vw:skip').setLabel('Nicht pingen').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('vw:never').setLabel('Nie pingen').setStyle(ButtonStyle.Danger),
         )],
       });
     } catch (err) {
@@ -89,8 +90,11 @@ module.exports = (client, logger = console) => {
         time: CONFIRM_TIMEOUT_MS,
         filter: i => i.user.id === member.id,
       });
+      const never = click.customId === 'vw:never';
       const ping = click.customId === 'vw:ping';
-      await click.update({ content: ping ? '📣 Ping wird gesendet.' : '🤫 Okay, kein Ping.', components: [] }).catch(() => {});
+      if (never) setNeverPing(voiceChannel.guild.id, member.id, true, logger);
+      const text = ping ? '📣 Ping wird gesendet.' : never ? '🔕 Okay, ich pinge für dich nie wieder. Rückgängig mit `/voicewait wiederfragen`.' : '🤫 Okay, kein Ping.';
+      await click.update({ content: text, components: [] }).catch(() => {});
       return ping;
     } catch {
       await dm.edit({ content: '📣 Keine Antwort – Ping wurde gesendet.', components: [] }).catch(() => {});
@@ -132,6 +136,11 @@ module.exports = (client, logger = console) => {
     if (now - current.sinceMs < waitMinutes * 60 * 1000) return;
 
     aloneState.set(key, { ...current, sending: true });
+
+    if (isNeverPing(channel.guild.id, member.id, logger)) {
+      aloneState.set(key, { ...current, notified: true, sending: false });
+      return;
+    }
 
     try {
       const confirmed = await confirmPing(member, channel, waitMinutes);

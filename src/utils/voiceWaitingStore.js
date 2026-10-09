@@ -120,8 +120,27 @@ function clearPingRole(guildId, logger) {
   return true;
 }
 
+// Personen, die nie einen Alleine-Ping auslösen wollen (Schlüssel `__neverPing`)
+function isNeverPing(guildId, userId, logger) {
+  ensureLoaded(logger);
+  return Boolean(config?.__neverPing?.[guildId]?.includes(userId));
+}
+
+function setNeverPing(guildId, userId, value, logger) {
+  ensureLoaded(logger);
+  const list = new Set(config.__neverPing?.[guildId] ?? []);
+  if (value) list.add(userId); else list.delete(userId);
+  if (!config.__neverPing) config.__neverPing = {};
+  if (list.size) config.__neverPing[guildId] = [...list];
+  else delete config.__neverPing[guildId];
+  if (!Object.keys(config.__neverPing).length) delete config.__neverPing;
+  persist(logger);
+}
+
 module.exports = {
   CONFIG_PATH,
+  isNeverPing,
+  setNeverPing,
   getPingRole,
   setPingRole,
   clearPingRole,
