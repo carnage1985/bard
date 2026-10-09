@@ -98,8 +98,52 @@ function listWaitingChannels(guildId, logger) {
   return config?.[guildId] ?? {};
 }
 
+// Ping-Rolle pro Server (Schlüssel `__pingRoles`, kollidiert nicht mit Guild-IDs)
+function getPingRole(guildId, logger) {
+  ensureLoaded(logger);
+  return config?.__pingRoles?.[guildId] ?? null;
+}
+
+function setPingRole(guildId, roleId, logger) {
+  ensureLoaded(logger);
+  if (!config.__pingRoles) config.__pingRoles = {};
+  config.__pingRoles[guildId] = roleId;
+  persist(logger);
+}
+
+function clearPingRole(guildId, logger) {
+  ensureLoaded(logger);
+  if (!config.__pingRoles?.[guildId]) return false;
+  delete config.__pingRoles[guildId];
+  if (!Object.keys(config.__pingRoles).length) delete config.__pingRoles;
+  persist(logger);
+  return true;
+}
+
+// Personen, die nie einen Alleine-Ping auslösen wollen (Schlüssel `__neverPing`)
+function isNeverPing(guildId, userId, logger) {
+  ensureLoaded(logger);
+  return Boolean(config?.__neverPing?.[guildId]?.includes(userId));
+}
+
+function setNeverPing(guildId, userId, value, logger) {
+  ensureLoaded(logger);
+  const list = new Set(config.__neverPing?.[guildId] ?? []);
+  if (value) list.add(userId); else list.delete(userId);
+  if (!config.__neverPing) config.__neverPing = {};
+  if (list.size) config.__neverPing[guildId] = [...list];
+  else delete config.__neverPing[guildId];
+  if (!Object.keys(config.__neverPing).length) delete config.__neverPing;
+  persist(logger);
+}
+
 module.exports = {
   CONFIG_PATH,
+  isNeverPing,
+  setNeverPing,
+  getPingRole,
+  setPingRole,
+  clearPingRole,
   watchConfig,
   setWaitingChannel,
   removeWaitingChannel,

@@ -1,7 +1,8 @@
-const { ChannelType } = require('discord.js');
-const { watchConfig, listWaitingChannels } = require('../utils/voiceWaitingStore');
+const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { watchConfig, listWaitingChannels, getPingRole, isNeverPing, setNeverPing } = require('../utils/voiceWaitingStore');
 
 const CHECK_INTERVAL_MS = 60 * 1000;
+const CONFIRM_TIMEOUT_MS = 30 * 1000;
 
 function isSupportedVoiceChannel(channel) {
   return channel && [ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type);
@@ -11,9 +12,10 @@ function getHumanMembers(channel) {
   return channel.members.filter(member => !member.user.bot);
 }
 
-function buildPingMessage(member, voiceChannel) {
+function buildPingMessage(member, voiceChannel, roleId) {
   const name = member.displayName || member.user.username;
-  return `@here **${name}** ist gerade alleine in <#${voiceChannel.id}> und würde sich über Gesellschaft freuen! 🎮`;
+  const target = roleId ? `<@&${roleId}>` : '@here';
+  return `${target} **${name}** ist gerade alleine in <#${voiceChannel.id}> und würde sich über Gesellschaft freuen! 🎮`;
 }
 
 module.exports = (client, logger = console) => {
@@ -39,9 +41,10 @@ module.exports = (client, logger = console) => {
       notifyChannel = voiceChannel;
     }
 
+    const roleId = getPingRole(voiceChannel.guild.id, logger);
     const sent = await notifyChannel.send({
-      content: buildPingMessage(member, voiceChannel),
-      allowedMentions: { parse: ['everyone'] },
+      content: buildPingMessage(member, voiceChannel, roleId),
+      allowedMentions: roleId ? { roles: [roleId] } : { parse: ['everyone'] },
     });
 
     if (!sent?.id) {
@@ -62,6 +65,41 @@ module.exports = (client, logger = console) => {
         logger.error(`❌ Voice-Wait: Verifikation der Nachricht (messageId=${sent.id}) fehlgeschlagen:`, err);
       }
     }, 60 * 1000);
+  }
+
+  // Fragt die alleine sitzende Person per DM (nur sie sieht es). Keine Antwort
+  // innerhalb von 30 s oder DMs geschlossen => Ping wird ausgelöst.
+  async function confirmPing(member, voiceChannel, waitMinutes) {
+    let dm;
+    try {
+      dm = await member.send({
+        content: `🎮 Du bist seit **${waitMinutes}** Min. alleine in **${voiceChannel.name}**. Soll ich die anderen anpingen? Ohne Antwort pinge ich in 30 Sekunden automatisch. („Nie pingen“ gilt dauerhaft, rückgängig mit \`/voicewait wiederfragen\`.)`,
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('vw:ping').setLabel('Ping auslösen').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId('vw:skip').setLabel('Nicht pingen').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('vw:never').setLabel('Nie pingen').setStyle(ButtonStyle.Danger),
+        )],
+      });
+    } catch (err) {
+      logger.warn(`⚠️ Voice-Wait: DM an user=${member.id} nicht möglich, pinge direkt.`);
+      return true;
+    }
+
+    try {
+      const click = await dm.awaitMessageComponent({
+        time: CONFIRM_TIMEOUT_MS,
+        filter: i => i.user.id === member.id,
+      });
+      const never = click.customId === 'vw:never';
+      const ping = click.customId === 'vw:ping';
+      if (never) setNeverPing(voiceChannel.guild.id, member.id, true, logger);
+      const text = ping ? '📣 Ping wird gesendet.' : never ? '🔕 Okay, ich pinge für dich nie wieder. Rückgängig mit `/voicewait wiederfragen`.' : '🤫 Okay, kein Ping.';
+      await click.update({ content: text, components: [] }).catch(() => {});
+      return ping;
+    } catch {
+      await dm.edit({ content: '📣 Keine Antwort – Ping wurde gesendet.', components: [] }).catch(() => {});
+      return true;
+    }
   }
 
   async function inspectChannel(channel, waitMinutes, notifyChannelId) {
@@ -99,7 +137,24 @@ module.exports = (client, logger = console) => {
 
     aloneState.set(key, { ...current, sending: true });
 
+    if (isNeverPing(channel.guild.id, member.id, logger)) {
+      aloneState.set(key, { ...current, notified: true, sending: false });
+      return;
+    }
+
     try {
+      const confirmed = await confirmPing(member, channel, waitMinutes);
+
+      // Währenddessen gegangen/gewechselt? Dann ist der State zurückgesetzt worden.
+      const latest = aloneState.get(key);
+      if (!latest || latest.sinceMs !== current.sinceMs) return;
+
+      if (!confirmed) {
+        aloneState.set(key, { ...current, notified: true, sending: false });
+        logger.info(`🤫 Voice-Wait Ping abgelehnt: channel=${channel.id} user=${member.id}`);
+        return;
+      }
+
       await sendPing(member, channel, notifyChannelId);
 
       aloneState.set(key, { ...current, notified: true, sending: false });
