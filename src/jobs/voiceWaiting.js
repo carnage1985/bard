@@ -73,7 +73,7 @@ module.exports = (client, logger = console) => {
     let dm;
     try {
       dm = await member.send({
-        content: `🎮 Du bist seit **${waitMinutes}** Min. alleine in **${voiceChannel.name}**. Soll ich die anderen anpingen? Ohne Antwort pinge ich in 30 Sekunden automatisch. („Nie pingen“ gilt dauerhaft, rückgängig mit `/voicewait wiederfragen`.)`,
+        content: `🎮 Du bist seit **${waitMinutes}** Min. alleine in **${voiceChannel.name}**. Soll ich die anderen anpingen? Ohne Antwort pinge ich in 30 Sekunden automatisch. („Nie pingen“ gilt dauerhaft, rückgängig mit \`/voicewait wiederfragen\`.)`,
         components: [new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('vw:ping').setLabel('Ping auslösen').setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId('vw:skip').setLabel('Nicht pingen').setStyle(ButtonStyle.Secondary),
