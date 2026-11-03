@@ -7,6 +7,9 @@ services:
     environment:
       BOT_TOKEN: "${BOT_TOKEN}"
       LOG_CHANNEL_ID: "${LOG_CHANNEL_ID:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-}"
       WEB_BASE_URL: "${WEB_BASE_URL:-}"
       WEB_PORT: "${WEB_PORT:-3000}"
     volumes:

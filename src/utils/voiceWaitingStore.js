@@ -137,8 +137,41 @@ function setNeverPing(guildId, userId, value, logger) {
   persist(logger);
 }
 
+// Aktive Alleine-Ping-Nachrichten (Schlüssel `__activePings`), damit sie nach einem Neustart gelöscht werden können
+function getActivePing(guildId, voiceChannelId, logger) {
+  ensureLoaded(logger);
+  return config?.__activePings?.[guildId]?.[voiceChannelId] ?? null;
+}
+
+function listActivePings(guildId, logger) {
+  ensureLoaded(logger);
+  return config?.__activePings?.[guildId] ?? {};
+}
+
+function setActivePing(guildId, voiceChannelId, ping, logger) {
+  ensureLoaded(logger);
+  if (!config.__activePings) config.__activePings = {};
+  if (!config.__activePings[guildId]) config.__activePings[guildId] = {};
+  config.__activePings[guildId][voiceChannelId] = ping;
+  persist(logger);
+}
+
+function clearActivePing(guildId, voiceChannelId, logger) {
+  ensureLoaded(logger);
+  if (!config.__activePings?.[guildId]?.[voiceChannelId]) return false;
+  delete config.__activePings[guildId][voiceChannelId];
+  if (!Object.keys(config.__activePings[guildId]).length) delete config.__activePings[guildId];
+  if (!Object.keys(config.__activePings).length) delete config.__activePings;
+  persist(logger);
+  return true;
+}
+
 module.exports = {
   CONFIG_PATH,
+  getActivePing,
+  listActivePings,
+  setActivePing,
+  clearActivePing,
   isNeverPing,
   setNeverPing,
   getPingRole,
