@@ -3,11 +3,6 @@
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const TIMEOUT_MS = 5000;
 
-const STYLES = [
-  'bardisch und blumig wie ein Barde aus Dungeons & Dragons, gern mit einem Hauch Reim',
-  'locker und kurz im Gaming-Slang',
-];
-
 // Welche Platzhalter die Antwort enthalten muss und was erzählt werden soll
 const KINDS = {
   ping: {
@@ -89,11 +84,10 @@ function validate(text, spec) {
 async function phrase(kind, fallback, vars, logger = console) {
   const spec = KINDS[kind];
   if (spec) {
-    const style = STYLES[Math.floor(Math.random() * STYLES.length)];
     const prompt = [
       `${spec.task}`,
-      `Stil: ${style}.`,
-      'Antworte auf Deutsch mit genau EINEM Satz (höchstens ' + spec.max + ' Zeichen), gern mit einem passenden Emoji.',
+      'Schreibe ganz normal und natürlich, so wie eine freundliche Person im Chat schreiben würde. Keine Rolle, keine Persona, keine Reime, keine Übertreibungen.',
+      'Antworte auf Deutsch mit genau EINEM kurzen Satz (höchstens ' + spec.max + ' Zeichen), ohne Emoji.',
       'Verwende die Platzhalter ' + spec.required.map(k => `{${k}}`).join(' und ') + ' genau so, wie sie hier stehen, jeweils mindestens einmal.',
       'Keine @-Erwähnungen, keine Links, keine Anführungszeichen, keine Erklärungen – nur den Satz.',
     ].join('\n');
