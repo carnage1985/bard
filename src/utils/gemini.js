@@ -1,6 +1,6 @@
 // Kleiner Gemini-Helfer (Free Tier, REST) für abwechslungsreiche statische Texte.
 // Ohne GEMINI_API_KEY oder bei Fehlern/ungültiger Antwort wird immer der feste Fallback-Text verwendet.
-const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const TIMEOUT_MS = 5000;
 
 const STYLES = [
