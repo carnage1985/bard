@@ -29,6 +29,14 @@ Die Engine kennt keine konkrete Rolle. **Eine Rolle = eine Datei** in `src/games
 ### Werwolf-Ablauf (Discord)
 Lobby mit Host-Optionen (Spezialrollen, Wolfsanzahl, Zeitprofil, Rollen aufdecken) → Nacht (alle server-gemutet, Wölfe im privaten Thread, Aktionen per DM) → Tag (Diskussion, Abstimmung per Button + ephemeres Menü) → Phasen-Timer: `state.deadline` ist persistiert, ein Tick alle 5 s ruft bei Ablauf `forceAdvance()`. Aktionen pro Server werden per Lock serialisiert. Bot-Rechte: Private Threads erstellen, Threads verwalten, Mitglieder stummschalten (Fallbacks vorhanden).
 
+## Sprachaufnahme (`/record start|stop`)
+`src/jobs/record.js` (Discord-Schicht) + `src/utils/recording.js` (reine Helfer, getestet): Bard tritt dem Sprachkanal bei (`@discordjs/voice`, braucht Node ≥ 22.12 und bringt Discords Pflicht-Verschlüsselung DAVE mit), schaltet alle server-stumm und markiert sie im Kanal des Befehls. **Zustimmung = Klick auf „Zustimmen & entmuten“** (Server-Mute kann man nicht selbst aufheben); nur wer geklickt hat, wird abonniert und aufgenommen, wer startet gilt als zugestimmt. Ende per `/record stop`, wenn außer Bots niemand mehr im Kanal ist oder der Bot getrennt wird.
+- Ablage: `DATA_DIR/recordings/<guildId>/<datum>_<kanal>/<userId>.ogg` (Opus-Pakete unverändert in Ogg, ohne Decoder/ffmpeg) + `session.json` (Teilnehmer, Charaktername aus `/dndchar`, Zeitindex). **Stille wird nicht gespeichert**: `segments` = ab Dateiposition `a` (ms) gilt Session-Zeit `t` (ms) – damit lassen sich Transkripte mehrerer Spuren zeitlich mischen.
+- Eigene Stummschaltungen stehen in `recordMutes.json` und werden beim Stopp, beim Kanalwechsel bzw. nächsten Betreten eines Sprachkanals und nach einem Neustart aufgehoben; fremde Stummschaltungen bleiben unangetastet.
+- Rechte: Standard nur Administratoren (`setDefaultMemberPermissions`), bewusst **ohne** zusätzliche Prüfung im Code, damit eine Rolle über Servereinstellungen → Integrationen freigeschaltet werden kann. Bot braucht im Kanal: Verbinden, Mitglieder stummschalten.
+- Ein Deploy (Push auf `main`) startet den Container neu und beendet eine laufende Aufnahme; die Spuren bis dahin bleiben abspielbar. Transkription/Zusammenfassung sind noch nicht umgesetzt (geplant: Whisper lokal).
+- Der echte Audio-Empfang ist nur mit Fake-Client und echten Opus-Paketen getestet – vor dem ersten Spielabend einmal mit echten Accounts ausprobieren.
+
 ## Konventionen
 - Spiellogik = reine Engine ohne Discord-Abhängigkeit, Zufall nur über übergebenen `rng`, Zustand JSON-serialisierbar (Persistenz/Neustart); getestet mit `npm test` (`node --test`).
 - Illegale Züge werfen einen Error, Aktionen geben Events zurück (Events mit `to` sind privat).
