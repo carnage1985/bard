@@ -5,9 +5,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/engine.test.js test/werewolf.test.js test/gemini.test.js"
+    "test": "node --test test/engine.test.js test/werewolf.test.js test/gemini.test.js test/recording.test.js"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.19.2",
     "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
     "gamedig": "^4.3.1",

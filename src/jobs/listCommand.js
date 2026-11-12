@@ -50,6 +50,9 @@ module.exports = (client, logger = console) => {
       '`/ww start` · `/ww status` · `/ww abbrechen` · `/ww regeln`',
       '→ Werwolf im Sprachkanal (Rollen per DM, nachts stumm, Wolfs-Thread, Optionen in der Lobby).',
       '',
+      '`/record start` · `/record stop`',
+      '→ Nimmt deinen Sprachkanal auf (eine Spur pro Person). Alle werden stummgeschaltet und markiert; wer auf „Zustimmen & entmuten“ klickt, wird aufgenommen. Endet auch, sobald alle den Kanal verlassen. *(Standard: nur Administratoren – eine Rolle lässt sich unter Servereinstellungen → Integrationen freischalten)*',
+      '',
       '`/chat message:` oder **@Bot** <Nachricht>',
       '→ Chattet mit dem Bot via AI. Schreibe `reset` als Nachricht um den Verlauf zu löschen.',
     ];
